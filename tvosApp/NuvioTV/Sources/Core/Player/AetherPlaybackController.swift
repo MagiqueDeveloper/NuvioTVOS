@@ -1492,7 +1492,7 @@ enum AetherExternalSubtitleIdentity {
         _ subtitles: [NuvioSubtitle]
     ) -> [(subtitle: NuvioSubtitle, url: URL)] {
         subtitles.compactMap { subtitle in
-            guard !subtitle.url.isEmpty, let url = URL(string: subtitle.url) else { return nil }
+            guard !subtitle.engineURL.isEmpty, let url = URL(string: subtitle.engineURL) else { return nil }
             return (subtitle, url)
         }
     }
@@ -1505,19 +1505,23 @@ struct AetherExternalSubtitleRegistration {
 
     static func make(
         subtitles: [NuvioSubtitle],
-        httpHeaders: [String: String]
+        httpHeaders _: [String: String]
     ) -> AetherExternalSubtitleRegistration {
         var tracks: [ExternalSubtitleTrack] = []
         var urlsByTrackID: [Int: String] = [:]
         for (subtitle, url) in AetherExternalSubtitleIdentity.accepted(subtitles) {
             let language = subtitle.language
             let id = AetherEngine.externalSubtitleTrackIDBase + tracks.count
+            // Add-on subtitle hosts must not inherit stream/debrid auth headers.
+            // An empty dictionary (not nil) prevents Aether from falling back to
+            // LoadOptions.httpHeaders during sidecar decode.
             tracks.append(
                 ExternalSubtitleTrack(
                     url: url,
                     name: subtitle.label ?? (language.isEmpty ? nil : language),
                     language: language.isEmpty ? nil : language,
-                    httpHeaders: httpHeaders.isEmpty ? nil : httpHeaders
+                    httpHeaders: [:],
+                    formatHint: subtitle.formatHint
                 )
             )
             urlsByTrackID[id] = subtitle.url
@@ -2400,13 +2404,16 @@ final class AetherPlaybackController: UIViewController, PlaybackEngineControllin
     }
 
     func addSubtitle(_ subtitle: NuvioSubtitle, select: Bool) {
-        guard let url = URL(string: subtitle.url) else { return }
+        guard let url = URL(string: subtitle.engineURL) else { return }
         let lang = subtitle.language
         let track = ExternalSubtitleTrack(
             url: url,
             name: subtitle.label ?? (lang.isEmpty ? nil : lang),
             language: lang.isEmpty ? nil : lang,
-            httpHeaders: currentHTTPHeaders.isEmpty ? nil : currentHTTPHeaders
+            // Empty dictionary — never nil — so sidecar decode does not inherit
+            // stream LoadOptions.httpHeaders (OpenSubtitles / subDL hosts).
+            httpHeaders: [:],
+            formatHint: subtitle.formatHint
         )
         let info = engine.addExternalSubtitleTrack(track)
         externalSubtitleURLsByTrackID[info.id] = subtitle.url

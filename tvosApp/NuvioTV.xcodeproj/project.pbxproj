@@ -142,6 +142,8 @@
 		PP0110030000000000000003 /* NuvioTV/Sources/UI/Player/PostPlayRecommendationOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = PP0100030000000000000003 /* NuvioTV/Sources/UI/Player/PostPlayRecommendationOverlay.swift */; };
 		PP0110040000000000000004 /* PostPlayRecommendationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PP0100040000000000000004 /* PostPlayRecommendationTests.swift */; };
 		PP0110050000000000000005 /* NuvioTV/Sources/UI/Player/PlayerLoadingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = PP0100050000000000000005 /* NuvioTV/Sources/UI/Player/PlayerLoadingOverlay.swift */; };
+		AE57B001 /* NuvioTV/Sources/Core/Player/ExternalSubtitleFileCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE57F001 /* NuvioTV/Sources/Core/Player/ExternalSubtitleFileCache.swift */; };
+		AE57B002 /* ExternalSubtitleFileCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE57F002 /* ExternalSubtitleFileCacheTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -235,6 +237,8 @@
 		AE10F00B /* PlaybackBackendPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackBackendPolicyTests.swift; sourceTree = "<group>"; };
 		AE10F01A /* CatalogArtworkMergeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogArtworkMergeTests.swift; sourceTree = "<group>"; };
 		AE10F00C /* NuvioTV/Sources/Core/Player/AISubtitleTranslationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuvioTV/Sources/Core/Player/AISubtitleTranslationCache.swift; sourceTree = "<group>"; };
+		AE57F001 /* NuvioTV/Sources/Core/Player/ExternalSubtitleFileCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuvioTV/Sources/Core/Player/ExternalSubtitleFileCache.swift; sourceTree = "<group>"; };
+		AE57F002 /* ExternalSubtitleFileCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalSubtitleFileCacheTests.swift; sourceTree = "<group>"; };
 		AE10F00E /* NuvioTV/Sources/Core/Player/AppleTVCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuvioTV/Sources/Core/Player/AppleTVCapability.swift; sourceTree = "<group>"; };
 		AE10F00F /* AppleTVCapabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleTVCapabilityTests.swift; sourceTree = "<group>"; };
 		AE10F011 /* PictureInPictureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PictureInPictureTests.swift; sourceTree = "<group>"; };
@@ -467,6 +471,7 @@
 				C0D3002F000000000000002F /* NuvioTV/Sources/Core/Debrid/RealDebridResolver.swift */,
 				C0D300320000000000000032 /* NuvioTV/Sources/Core/Debrid/TorboxResolver.swift */,
 				AE10F00C /* NuvioTV/Sources/Core/Player/AISubtitleTranslationCache.swift */,
+				AE57F001 /* NuvioTV/Sources/Core/Player/ExternalSubtitleFileCache.swift */,
 				AE10F007 /* NuvioTV/Sources/Core/Player/AetherPlaybackController.swift */,
 				AE10F00E /* NuvioTV/Sources/Core/Player/AppleTVCapability.swift */,
 				AE10F009 /* NuvioTV/Sources/Core/Player/MPVPlaybackController.swift */,
@@ -597,6 +602,7 @@
 				AE10F01D /* PlayerControlsSettingsTests.swift */,
 				AE10F01E /* AuthReauthFlowTests.swift */,
 				AE10F01F /* HomeLayoutSettingsTests.swift */,
+				AE57F002 /* ExternalSubtitleFileCacheTests.swift */,
 				T0D300E200000000000000E2 /* StreamsDiscoveryTests.swift */,
 				T0D300E3 /* StreamQualityTagsTests.swift */,
 				T0D300E4 /* CatalogDecodingTests.swift */,
@@ -802,6 +808,7 @@
 				AE10B01D /* PlayerControlsSettingsTests.swift in Sources */,
 				AE10B01E /* AuthReauthFlowTests.swift in Sources */,
 				AE10B01F /* HomeLayoutSettingsTests.swift in Sources */,
+				AE57B002 /* ExternalSubtitleFileCacheTests.swift in Sources */,
 				T0D310E200000000000000E2 /* StreamsDiscoveryTests.swift in Sources */,
 				T0D310E3 /* StreamQualityTagsTests.swift in Sources */,
 				T0D310E4 /* CatalogDecodingTests.swift in Sources */,
@@ -873,6 +880,7 @@
 				AE10B008 /* NuvioTV/Sources/Core/Player/PlaybackSessionCoordinator.swift in Sources */,
 				AE10B009 /* NuvioTV/Sources/Core/Player/MPVPlaybackController.swift in Sources */,
 				AE10B00C /* NuvioTV/Sources/Core/Player/AISubtitleTranslationCache.swift in Sources */,
+				AE57B001 /* NuvioTV/Sources/Core/Player/ExternalSubtitleFileCache.swift in Sources */,
 				AE10B00A /* NuvioTV/Sources/UI/Player/PlayerSubtitleOverlay.swift in Sources */,
 				C0D31051 /* NuvioTV/Sources/Core/Player/PlaybackEngineControlling.swift in Sources */,
 				AE10B010 /* NuvioTV/Sources/Core/Player/PictureInPictureManager.swift in Sources */,
