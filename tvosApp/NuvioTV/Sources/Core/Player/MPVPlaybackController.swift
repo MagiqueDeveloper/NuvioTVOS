@@ -556,13 +556,9 @@ final class MPVPlayerViewController: UIViewController, PlaybackEngineControlling
             checkError(mpv_set_option_string(mpv, "alang", alang))
         }
         let preferredSubtitleLanguages = SubtitleLanguagePreferences.orderedFromDefaults()
-        let shouldStrictlyMatchSubtitles = SubtitleLanguagePreferences.smartMatchingEnabled() &&
-            !preferredSubtitleLanguages.isEmpty
         if let slang = SubtitleLanguagePreferences.mpvLanguageList(for: preferredSubtitleLanguages) {
             checkError(mpv_set_option_string(mpv, "slang", slang))
         }
-        checkError(mpv_set_option_string(mpv, "subs-match-os-language", shouldStrictlyMatchSubtitles ? "no" : "yes"))
-        checkError(mpv_set_option_string(mpv, "subs-fallback", shouldStrictlyMatchSubtitles ? "no" : "yes"))
         // ASS/SSA override: Strip (default) flattens styling into app subtitle
         // style so top-aligned dialogue stays in the safe area; Scale keeps
         // layout with size adjust; Force applies style more aggressively.
@@ -1986,9 +1982,13 @@ final class MPVPlayerViewController: UIViewController, PlaybackEngineControlling
         return Int(data)
     }
 
-    private func checkError(_ status: CInt) {
+    private func checkError(_ status: CInt, context: String? = nil) {
         if status < 0 {
-            print("[MPV] API error: \(String(cString: mpv_error_string(status)))")
+            if let context {
+                print("[MPV] API error for \(context): \(String(cString: mpv_error_string(status)))")
+            } else {
+                print("[MPV] API error: \(String(cString: mpv_error_string(status)))")
+            }
         }
     }
 }

@@ -44,6 +44,12 @@ struct CloudLibraryView: View {
             .padding(.top, 56)
         }
         .onExitCommand { openItem == nil ? onBack() : closeItem() }
+        .onAppear {
+            TVHomeDebugTrace.log("cloudLibrary.appear")
+        }
+        .onDisappear {
+            TVHomeDebugTrace.log("cloudLibrary.disappear")
+        }
         .task { await viewModel.load() }
     }
 

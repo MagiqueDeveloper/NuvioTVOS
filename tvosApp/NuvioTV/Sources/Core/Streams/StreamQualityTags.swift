@@ -367,6 +367,28 @@ enum LastPlaybackStreamStore {
         return (record.url, record.httpHeaders ?? [:])
     }
 
+    static func remove(
+        metaId: String,
+        season: Int? = nil,
+        episode: Int? = nil,
+        profileId: String? = nil
+    ) {
+        let trimmedMetaId = metaId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMetaId.isEmpty else { return }
+        let store = defaults(for: profileId)
+        let key = prefix + trimmedMetaId
+        if season == nil && episode == nil {
+            store.removeObject(forKey: key)
+            return
+        }
+        if let data = store.data(forKey: key),
+           let record = try? JSONDecoder().decode(Record.self, from: data) {
+            if (season == nil || record.season == season) && (episode == nil || record.episode == episode) {
+                store.removeObject(forKey: key)
+            }
+        }
+    }
+
     private static func defaults(for profileId: String?) -> UserDefaults {
         if let profileId {
             return ProfileSettings.store(for: profileId)

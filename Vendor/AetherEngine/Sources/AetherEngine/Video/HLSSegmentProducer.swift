@@ -37,12 +37,11 @@ final class HLSSegmentProducer: @unchecked Sendable {
         /// force `dvh1` / `hvc1` / `avc1` instead of FFmpeg's defaults
         /// of `hev1` / `h264`, which AVPlayer rejects.
         let codecTagOverride: String?
-        /// Strip the dvcC record (P7 on non-DV panel, P8.2). Mutually exclusive with `rewriteDoviConfigTo81`.
-        let stripDolbyVisionMetadata: Bool
-        /// Per-packet RPU conversion P7 -> 8.1 (HEVC P7 on DV panel). Container dvcC rewrite is separate (`rewriteDoviConfigTo81`).
+        /// What the muxer does with the source dvcC record. See `MP4SegmentMuxer.DoviConfigPolicy`.
+        let doviConfig: MP4SegmentMuxer.DoviConfigPolicy
+        /// Per-packet RPU conversion P7 -> 8.1 (HEVC P7 on DV panel). The container dvcC is a separate
+        /// decision (`doviConfig`); this one rewrites the bitstream.
         let convertP7ToProfile81: Bool
-        /// Rewrite container dvcC to valid P8.1 in init.mp4; true for P7-on-DV-panel and malformed-P8.6-on-DV-panel routes.
-        let rewriteDoviConfigTo81: Bool
         /// Optional color-signaling override forwarded to `MP4SegmentMuxer.ColorOverride`.
         let colorOverride: MP4SegmentMuxer.ColorOverride?
         /// Optional replacement for `codecpar.extradata` before write_header.
@@ -56,9 +55,8 @@ final class HLSSegmentProducer: @unchecked Sendable {
             codecpar: UnsafePointer<AVCodecParameters>,
             timeBase: AVRational,
             codecTagOverride: String?,
-            stripDolbyVisionMetadata: Bool = false,
+            doviConfig: MP4SegmentMuxer.DoviConfigPolicy = .keep,
             convertP7ToProfile81: Bool = false,
-            rewriteDoviConfigTo81: Bool = false,
             colorOverride: MP4SegmentMuxer.ColorOverride? = nil,
             extradataOverride: [UInt8]? = nil,
             nalFramingOverride: VideoNALFraming? = nil
@@ -66,9 +64,8 @@ final class HLSSegmentProducer: @unchecked Sendable {
             self.codecpar = codecpar
             self.timeBase = timeBase
             self.codecTagOverride = codecTagOverride
-            self.stripDolbyVisionMetadata = stripDolbyVisionMetadata
+            self.doviConfig = doviConfig
             self.convertP7ToProfile81 = convertP7ToProfile81
-            self.rewriteDoviConfigTo81 = rewriteDoviConfigTo81
             self.colorOverride = colorOverride
             self.extradataOverride = extradataOverride
             self.nalFramingOverride = nalFramingOverride
@@ -89,6 +86,9 @@ final class HLSSegmentProducer: @unchecked Sendable {
         let bridge: AudioBridge?
         /// Strip 7/9-byte ADTS header per frame for MPEG-TS AAC stream-copy into fMP4; engine synthesises the ASC.
         let stripAacAdts: Bool
+        /// AE#458: the source track's language as ISO 639-2/T, carried into every muxer this config builds
+        /// (a producer restart rebuilds one, so it has to live on the config, not on the first muxer).
+        let language: String?
 
         init(codecpar: UnsafePointer<AVCodecParameters>,
              timeBase: AVRational,
@@ -96,7 +96,8 @@ final class HLSSegmentProducer: @unchecked Sendable {
              inputTimeBase: AVRational,
              sourceTimeBase: AVRational,
              bridge: AudioBridge?,
-             stripAacAdts: Bool = false) {
+             stripAacAdts: Bool = false,
+             language: String? = nil) {
             self.codecpar = codecpar
             self.timeBase = timeBase
             self.sourceStreamIndex = sourceStreamIndex
@@ -104,6 +105,7 @@ final class HLSSegmentProducer: @unchecked Sendable {
             self.sourceTimeBase = sourceTimeBase
             self.bridge = bridge
             self.stripAacAdts = stripAacAdts
+            self.language = language
         }
     }
 
@@ -576,7 +578,7 @@ final class HLSSegmentProducer: @unchecked Sendable {
     private static let liveSegmentStallTimeoutSeconds: TimeInterval = 10
     /// Source-starvation timeout: feed trickles (slow/flaky CDN). Ingest retries ~31 s then terminates;
     /// escalating at the tight wedge timeout turns one slow segment into a full host retune (device repro: hung on -1001).
-    private static let liveSourceStarvationTimeoutSeconds: TimeInterval = 35
+    static let liveSourceStarvationTimeoutSeconds: TimeInterval = 35
     /// Read rate (pkt/s) threshold classifying a no-cut stall as cutter-wedge vs. source-starvation.
     /// Healthy 1080p25: ~60 pkt/s. Rate-based to avoid misreading a trickle that accumulated a high count (Alex Berlin: 137 pkts/13 s = 10.5 pkt/s).
     static let liveWedgeProgressRateThreshold: Double = 40
@@ -713,6 +715,10 @@ final class HLSSegmentProducer: @unchecked Sendable {
     /// so the race-ahead parks once it has filled the session retention budget (`PrefetchDiskBudget`).
     /// 0 disables the park (live, and any host that never opted in stays far below its budget anyway).
     private let prefetchDiskBudgetBytes: Int
+
+    /// AE#464: the host's audio offset this producer's muxers write. Fixed for the producer's life;
+    /// a new value arrives as a new producer (see `MP4SegmentMuxer.audioDelaySeconds`).
+    private let audioDelaySeconds: Double
 
     /// #65 stall diag: only log a park once it exceeds ~2 segment durations of zero playback progress, so normal
     /// backpressure (releases within one segment) stays silent and a real wedge surfaces its frozen tuple.
@@ -980,15 +986,14 @@ final class HLSSegmentProducer: @unchecked Sendable {
         return actualFirstPts &- desiredTfdtPts
     }
 
-    /// AE#418 round 5: how far after its own decode time the gating sample is PRESENTED.
+    /// AE#418 round 5: how far after its own decode time the gating sample is PRESENTED, named on the
+    /// gate-open line so a log says what reorder depth the gate opened at.
     ///
-    /// Measured with `play --picture-probe` on the fixture pair (`tc-bframes.mkv` against
-    /// `tc-drought.mkv`, identical but for `-bf 3`): the FIRST placement into an item's timeline puts
-    /// the segment's first presented sample at its advertised start, and every later placement puts
-    /// its first DECODED sample there instead, so the picture arrives this much later than the
-    /// advertised start read through the axis. Without B-frames the two are one number and no
-    /// composition moves; with them, a second placement of a segment worth -9.000 s read -18.083 s
-    /// off the picture where the composition predicted -18.000 s, on every run.
+    /// Rounds 5 to 7 also composed with it, on the premise that a placement sits below its axis by
+    /// some multiple of this. Round 8 measured a clip with no frame reordering at all, whose every
+    /// gate opens with a lead of zero, sitting a frame below its axis on its third placement, which
+    /// no multiple of zero describes. The composition measures that distance directly now; this stays
+    /// a source fact worth printing.
     static func presentationLeadPts(actualFirstPts: Int64, actualFirstDts: Int64) -> Int64 {
         guard actualFirstPts != Int64.min, actualFirstDts != Int64.min else { return 0 }
         return Swift.max(0, actualFirstPts &- actualFirstDts)
@@ -1114,12 +1119,7 @@ final class HLSSegmentProducer: @unchecked Sendable {
     /// `firstItemTfdtPts` is this producer's planned first tfdt, i.e. the item-axis position (same TB) from which
     /// its shift applies. Everything below it on the item axis was muxed by an earlier producer under an earlier
     /// shift and may still be in AVPlayer's buffer, so a consumer needs the pair, not the shift alone (#260).
-    /// AE#418 round 5: `presentationLeadPts` is what the gating sample is presented AFTER it is
-    /// decoded (its composition offset). A placement composed onto a run that is already in the
-    /// timeline lands exactly that much later than the advertised start read through the axis, so the
-    /// consumer needs it alongside the shift; on a source without reordering it is zero and nothing
-    /// about the composition changes.
-    var onVideoShiftKnown: (@Sendable (_ shiftPts: Int64, _ firstItemTfdtPts: Int64, _ presentationLeadPts: Int64) -> Void)?
+    var onVideoShiftKnown: (@Sendable (_ shiftPts: Int64, _ firstItemTfdtPts: Int64) -> Void)?
 
     /// Fires at live program boundary with updated videoShiftPts and seamOutputSeconds (AVPlayer clock position of the seam).
     /// Distinct from onVideoShiftKnown: the new shift is at the producer edge, AVPlayer renders it buffer+holdback later.
@@ -1360,9 +1360,11 @@ final class HLSSegmentProducer: @unchecked Sendable {
         prefetchDiskBudgetBytes: Int = 0,
         audioMoovPrimeFrame: [UInt8]? = nil,
         audioMoovPrimeKnownUnobtainable: Bool = false,
+        audioDelaySeconds: Double = 0,
         epoch: UInt64 = 0
     ) throws {
         self.epoch = epoch
+        self.audioDelaySeconds = audioDelaySeconds
         self.audioMoovPrimeFrame = audioMoovPrimeFrame
         self.audioMoovPrimeKnownUnobtainable = audioMoovPrimeKnownUnobtainable
         self.capturesAudioPrimeFrames =
@@ -1484,6 +1486,13 @@ final class HLSSegmentProducer: @unchecked Sendable {
     }
 
     /// Returns absolute segment index for a live video packet; cuts on keyframes past targetSegmentDurationSeconds.
+    ///
+    /// AE#446 round 6: seg-0's recorded start is a PRESENTATION time, and the shift anchors the first
+    /// DECODE time at 0, so on a source with frame reordering the first segment of a live session
+    /// begins one presentation lead above zero rather than at 0.000 (`lead=` on the gate-open line).
+    /// That is the number the item's stated axis carries, and it is a property of the source: 0.033s
+    /// on a 60 fps `-bf 3` seed here, 0.050s on the reporter's broadcast TS, 0.000s on the bundled
+    /// seed, which is why a harness that only ran the bundled seed made zero look like a rule.
     private func liveVideoSegmentIndex(pts: Int64, isKeyframe: Bool) -> Int {
         let ptsSeconds = Double(pts) * sourceVideoTbSeconds
         if !liveFirstSegmentOpened {
@@ -1967,13 +1976,12 @@ final class HLSSegmentProducer: @unchecked Sendable {
             codecTagOverride: videoConfig.codecTagOverride,
             // Ad creative carries its own signaling; don't force the program's overrides onto it. A same-PID
             // parameter-set change is still the same program, so it keeps them (isAdCreative false).
-            stripDolbyVisionMetadata: isAdCreative ? false : videoConfig.stripDolbyVisionMetadata,
-            rewriteDoviConfigTo81: isAdCreative ? false : videoConfig.rewriteDoviConfigTo81,
+            doviConfig: isAdCreative ? .keep : videoConfig.doviConfig,
             colorOverride: isAdCreative ? nil : videoConfig.colorOverride,
             extradataOverride: isAdCreative ? nil : videoConfig.extradataOverride
         )
         let muxerAudio: MP4SegmentMuxer.AudioConfig? = audioConfig.map { a in
-            MP4SegmentMuxer.AudioConfig(codecpar: a.codecpar, timeBase: a.inputTimeBase)
+            MP4SegmentMuxer.AudioConfig(codecpar: a.codecpar, timeBase: a.inputTimeBase, language: a.language)
         }
 
         do {
@@ -1993,6 +2001,7 @@ final class HLSSegmentProducer: @unchecked Sendable {
                 // AE#222 + mid-session rotation: the last frame a muxer accepted, or the host's
                 // construction-time prime while no muxer has accepted one yet.
                 audioMoovPrimeFrame: audioMoovPrimeFrame,
+                audioDelaySeconds: audioDelaySeconds,
                 onInitCaptured: { [weak self] initBytes in
                     guard let self = self else { return }
                     if versionedInit {
@@ -3491,10 +3500,7 @@ final class HLSSegmentProducer: @unchecked Sendable {
                             Self.presentedShiftPts(
                                 actualFirstPts: firstActualVideoPts,
                                 desiredTfdtPts: desiredFirstVideoTfdtPts),
-                            desiredFirstVideoTfdtPts,
-                            Self.presentationLeadPts(
-                                actualFirstPts: firstActualVideoPts,
-                                actualFirstDts: firstActualVideoDts))
+                            desiredFirstVideoTfdtPts)
                         // #133 follow-up: the gating IDR's in-band SPS/PPS back this epoch's muxer avcC. Establish
                         // the baseline so a later same-PID parameter-set change (encoder restart / regional splice)
                         // is detected against it. joinConfig is non-nil only in the liveH264AnnexBJoin scope.

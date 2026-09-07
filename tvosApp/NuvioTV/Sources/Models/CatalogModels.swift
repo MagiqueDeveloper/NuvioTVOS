@@ -423,6 +423,28 @@ enum EpisodeReleasePolicy {
     /// The window during which an aired up-next episode is presented as new.
     static let newEpisodeWindowDays = 60
 
+    // ISO8601DateFormatter is expensive to construct and its instances are
+    // shared behind this lock because release dates are read from SwiftUI and
+    // sync work on several threads. Keep both successful and failed parses so
+    // malformed metadata cannot repeatedly take the formatter path.
+    private static let releaseDateCacheLimit = 256
+    private static let releaseDateCacheLock = NSLock()
+    private static let fractionalISO8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let standardISO8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+    private struct CachedReleaseDate {
+        let value: Date?
+    }
+    private static var releaseDateCache: [String: CachedReleaseDate] = [:]
+    private static var releaseDateCacheOrder: [String] = []
+
     static var showUnairedNextUp: Bool {
         if ProfileSettings.current.object(forKey: showUnairedNextUpKey) == nil {
             return true
@@ -513,25 +535,46 @@ enum EpisodeReleasePolicy {
         guard let raw = released?.trimmingCharacters(in: .whitespacesAndNewlines),
               !raw.isEmpty else { return nil }
 
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: raw) { return date }
+        releaseDateCacheLock.lock()
+        defer { releaseDateCacheLock.unlock() }
+        if let cached = releaseDateCache[raw] {
+            return cached.value
+        }
 
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-        if let date = standard.date(from: raw) { return date }
+        let parsed: Date?
+        if let date = fractionalISO8601Formatter.date(from: raw) {
+            parsed = date
+        } else if let date = standardISO8601Formatter.date(from: raw) {
+            parsed = date
+        } else if let day = isoDay(raw) {
+            let parts = day.split(separator: "-").compactMap { Int($0) }
+            guard parts.count == 3 else {
+                cacheReleaseDate(nil, for: raw)
+                return nil
+            }
 
-        guard let day = isoDay(raw) else { return nil }
-        let parts = day.split(separator: "-").compactMap { Int($0) }
-        guard parts.count == 3 else { return nil }
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+            var components = DateComponents()
+            components.year = parts[0]
+            components.month = parts[1]
+            components.day = parts[2]
+            parsed = calendar.date(from: components)
+        } else {
+            parsed = nil
+        }
 
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
-        var components = DateComponents()
-        components.year = parts[0]
-        components.month = parts[1]
-        components.day = parts[2]
-        return calendar.date(from: components)
+        cacheReleaseDate(parsed, for: raw)
+        return parsed
+    }
+
+    private static func cacheReleaseDate(_ value: Date?, for raw: String) {
+        releaseDateCache[raw] = CachedReleaseDate(value: value)
+        releaseDateCacheOrder.append(raw)
+        if releaseDateCacheOrder.count > releaseDateCacheLimit {
+            let evicted = releaseDateCacheOrder.removeFirst()
+            releaseDateCache.removeValue(forKey: evicted)
+        }
     }
 
     /// Parses the calendar day portion at local midnight. This is used only for
@@ -1251,6 +1294,22 @@ struct ContinueWatchingItem: Identifiable, Codable {
         }
         return L10n.format("cw_minutes_left", fallback: "%dm left", max(minutes, 1))
     }
+
+    func isContentEqual(to other: ContinueWatchingItem) -> Bool {
+        meta == other.meta
+            && streamUrl == other.streamUrl
+            && position == other.position
+            && duration == other.duration
+            && lastWatchedAt == other.lastWatchedAt
+            && season == other.season
+            && episode == other.episode
+            && released == other.released
+            && isUpNext == other.isUpNext
+            && episodeTitleOverride == other.episodeTitleOverride
+            && episodeOverviewOverride == other.episodeOverviewOverride
+            && episodeThumbnailOverride == other.episodeThumbnailOverride
+            && upNextSeedSeason == other.upNextSeedSeason
+    }
 }
 
 /// Orders the Continue Watching row.
@@ -1260,53 +1319,60 @@ struct ContinueWatchingItem: Identifiable, Codable {
 /// its air date so a returning show surfaces the day it returns instead of at
 /// the age of the episode that seeded it.
 enum ContinueWatchingSortPolicy {
+    private struct SortEntry {
+        let item: ContinueWatchingItem
+        let index: Int
+        let isUpcoming: Bool
+        let recencyDate: Date
+        let airDate: Date?
+        let releaseKey: String
+    }
+
     static func isUpcomingItem(_ item: ContinueWatchingItem) -> Bool {
         item.isUpNextEntry && !item.hasAired && !item.isAiringToday
     }
 
     static func sorted(_ items: [ContinueWatchingItem], preference: String) -> [ContinueWatchingItem] {
+        let entries = makeEntries(items)
         switch preference {
         case "Streaming Style":
-            let (released, unreleased) = partitionByAirStatus(items)
-            return released + unreleased
+            let (released, unreleased) = partitionEntries(entries)
+            return released.map(\.item) + unreleased.map(\.item)
         case "Separate Upcoming Row":
-            let (released, _) = partitionByAirStatus(items)
-            return released
+            return partitionEntries(entries).released.map(\.item)
         case "Recently watched":
-            return items.enumerated()
+            return entries
                 .sorted { lhs, rhs in
-                    if lhs.element.recencySortDate != rhs.element.recencySortDate {
-                        return lhs.element.recencySortDate > rhs.element.recencySortDate
+                    if lhs.recencyDate != rhs.recencyDate {
+                        return lhs.recencyDate > rhs.recencyDate
                     }
-                    return lhs.offset < rhs.offset
+                    return lhs.index < rhs.index
                 }
-                .map(\.element)
+                .map(\.item)
         case "Release order":
-            return items.enumerated()
+            return entries
                 .sorted { lhs, rhs in
-                    let left = releaseKey(lhs.element)
-                    let right = releaseKey(rhs.element)
-                    if left != right { return left > right }
-                    if lhs.element.recencySortDate != rhs.element.recencySortDate {
-                        return lhs.element.recencySortDate > rhs.element.recencySortDate
+                    if lhs.releaseKey != rhs.releaseKey { return lhs.releaseKey > rhs.releaseKey }
+                    if lhs.recencyDate != rhs.recencyDate {
+                        return lhs.recencyDate > rhs.recencyDate
                     }
-                    return lhs.offset < rhs.offset
+                    return lhs.index < rhs.index
                 }
-                .map(\.element)
+                .map(\.item)
         case "Next up":
-            return items.enumerated()
+            return entries
                 .sorted { lhs, rhs in
-                    if lhs.element.isUpNextEntry != rhs.element.isUpNextEntry {
-                        return lhs.element.isUpNextEntry
+                    if lhs.item.isUpNextEntry != rhs.item.isUpNextEntry {
+                        return lhs.item.isUpNextEntry
                     }
-                    if lhs.element.recencySortDate != rhs.element.recencySortDate {
-                        return lhs.element.recencySortDate > rhs.element.recencySortDate
+                    if lhs.recencyDate != rhs.recencyDate {
+                        return lhs.recencyDate > rhs.recencyDate
                     }
-                    return lhs.offset < rhs.offset
+                    return lhs.index < rhs.index
                 }
-                .map(\.element)
+                .map(\.item)
         case "Default":
-            return sortByRecency(items)
+            return sortEntriesByRecency(entries).map(\.item)
         default:
             return items
         }
@@ -1322,19 +1388,32 @@ enum ContinueWatchingSortPolicy {
     static func partitionByAirStatus(
         _ items: [ContinueWatchingItem]
     ) -> (released: [ContinueWatchingItem], unreleased: [ContinueWatchingItem]) {
-        var released: [ContinueWatchingItem] = []
-        var unreleased: [ContinueWatchingItem] = []
-        for item in items {
-            if isUpcomingItem(item) {
-                unreleased.append(item)
-            } else {
-                released.append(item)
-            }
+        let (released, unreleased) = partitionEntries(makeEntries(items))
+        return (released.map(\.item), unreleased.map(\.item))
+    }
+
+    private static func makeEntries(_ items: [ContinueWatchingItem]) -> [SortEntry] {
+        items.enumerated().map { index, item in
+            SortEntry(
+                item: item,
+                index: index,
+                isUpcoming: isUpcomingItem(item),
+                recencyDate: item.recencySortDate,
+                airDate: airDate(item),
+                releaseKey: releaseKey(item)
+            )
         }
-        let sortedReleased = sortByRecency(released)
-        let sortedUnreleased = unreleased.enumerated().sorted { lhs, rhs in
-            let dateL = airDate(lhs.element)
-            let dateR = airDate(rhs.element)
+    }
+
+    private static func partitionEntries(
+        _ entries: [SortEntry]
+    ) -> (released: [SortEntry], unreleased: [SortEntry]) {
+        let released = entries.filter { !$0.isUpcoming }
+        let unreleased = entries.filter(\.isUpcoming)
+        let sortedReleased = sortEntriesByRecency(released)
+        let sortedUnreleased = unreleased.sorted { lhs, rhs in
+            let dateL = lhs.airDate
+            let dateR = rhs.airDate
             switch (dateL, dateR) {
             case let (dateL?, dateR?) where dateL != dateR:
                 return dateL < dateR
@@ -1343,22 +1422,25 @@ enum ContinueWatchingSortPolicy {
             case (nil, _?):
                 return false
             default:
-                return lhs.offset < rhs.offset
+                return lhs.index < rhs.index
             }
-        }.map(\.element)
+        }
 
         return (sortedReleased, sortedUnreleased)
     }
 
     private static func sortByRecency(_ items: [ContinueWatchingItem]) -> [ContinueWatchingItem] {
-        items.enumerated()
+        sortEntriesByRecency(makeEntries(items)).map(\.item)
+    }
+
+    private static func sortEntriesByRecency(_ entries: [SortEntry]) -> [SortEntry] {
+        entries
             .sorted { lhs, rhs in
-                if lhs.element.recencySortDate != rhs.element.recencySortDate {
-                    return lhs.element.recencySortDate > rhs.element.recencySortDate
+                if lhs.recencyDate != rhs.recencyDate {
+                    return lhs.recencyDate > rhs.recencyDate
                 }
-                return lhs.offset < rhs.offset
+                return lhs.index < rhs.index
             }
-            .map(\.element)
     }
 
     private static func airDate(_ item: ContinueWatchingItem) -> Date? {
@@ -2169,59 +2251,63 @@ enum ContinueWatchingStore {
 
     @discardableResult
     private static func persist(_ items: [ContinueWatchingItem]) -> Bool {
-        let storedItems = Array(items.prefix(maxItems))
-        let data: Data
-        do {
-            data = try makeEncoder().encode(storedItems)
-        } catch {
-            persistenceDiagnostic = "encode failed: \(diagnosticText(for: error))"
-            return false
-        }
-
-        let key = storageKey
-        // A rebuild with no real change (an account pull that did not move the
-        // row) must not shear the multi-megabyte payload back to disk every
-        // time. The encoded bytes are authoritative — if they match the last
-        // written bytes exactly, nothing changed, so skip the disk write and
-        // the notification.
-        if cachedKey == key, let cachedData, cachedData == data {
-            return true
-        }
-        guard let url = storageURL(for: key) else {
-            persistenceDiagnostic = "save failed: Caches unavailable"
-            return false
-        }
-
-        do {
-            try writeAndVerify(data, to: url)
-            // Retire any copy an older build left in a directory tvOS will not
-            // let us write to again.
-            for legacyURL in legacyStorageURLs(for: key) {
-                try? FileManager.default.removeItem(at: legacyURL)
+        TVHomeDebugTrace.measure("cw.persist items=\(items.count)") {
+            let persistStarted = TVHomeDebugTrace.now()
+            let storedItems = Array(items.prefix(maxItems))
+            let data: Data
+            do {
+                data = try makeEncoder().encode(storedItems)
+            } catch {
+                persistenceDiagnostic = "encode failed: \(diagnosticText(for: error))"
+                return false
             }
-            let defaults = UserDefaults.standard
-            defaults.removeObject(forKey: key)
-            defaults.removeObject(forKey: fallbackMarkerKey(for: key))
-            // What was just written *is* what the next read would decode, so
-            // refresh the memo rather than clearing it — a save during playback
-            // would otherwise force a full re-decode on the next row refresh.
-            cachedItems = storedItems
-                .filter { shouldKeep(position: $0.position, duration: $0.duration) }
-                .sorted { $0.lastWatchedAt > $1.lastWatchedAt }
-            cachedKey = key
-            cachedData = data
-            persistenceDiagnostic = "Caches: \(storedItems.count) item(s), \(data.count) bytes"
-            NotificationCenter.default.post(name: changedNotification, object: nil)
-            writeTopShelfFeed()
-            return true
-        } catch {
-            // Deliberately no UserDefaults fallback: a synced list carries several
-            // megabytes of episode metadata, and tvOS 27 aborts the process when a
-            // value that large is written to UserDefaults.
-            // The file may have been partially written, so trust disk over memory.
-            invalidateCache()
-            persistenceDiagnostic = "save failed: \(diagnosticText(for: error))"
-            return false
+
+            let key = storageKey
+            // A rebuild with no real change (an account pull that did not move the
+            // row) must not shear the multi-megabyte payload back to disk every
+            // time. The encoded bytes are authoritative — if they match the last
+            // written bytes exactly, nothing changed, so skip the disk write and
+            // the notification.
+            if cachedKey == key, let cachedData, cachedData == data {
+                return true
+            }
+            guard let url = storageURL(for: key) else {
+                persistenceDiagnostic = "save failed: Caches unavailable"
+                return false
+            }
+
+            do {
+                try writeAndVerify(data, to: url)
+                // Retire any copy an older build left in a directory tvOS will not
+                // let us write to again.
+                for legacyURL in legacyStorageURLs(for: key) {
+                    try? FileManager.default.removeItem(at: legacyURL)
+                }
+                let defaults = UserDefaults.standard
+                defaults.removeObject(forKey: key)
+                defaults.removeObject(forKey: fallbackMarkerKey(for: key))
+                // What was just written *is* what the next read would decode, so
+                // refresh the memo rather than clearing it — a save during playback
+                // would otherwise force a full re-decode on the next row refresh.
+                cachedItems = storedItems
+                    .filter { shouldKeep(position: $0.position, duration: $0.duration) }
+                    .sorted { $0.lastWatchedAt > $1.lastWatchedAt }
+                cachedKey = key
+                cachedData = data
+                persistenceDiagnostic = "Caches: \(storedItems.count) item(s), \(data.count) bytes"
+                TVHomeDebugTrace.log("cw.persist posting changedNotification dataBytes=\(data.count) elapsed=\(TVHomeDebugTrace.elapsedMilliseconds(since: persistStarted))ms")
+                NotificationCenter.default.post(name: changedNotification, object: nil)
+                writeTopShelfFeed()
+                return true
+            } catch {
+                // Deliberately no UserDefaults fallback: a synced list carries several
+                // megabytes of episode metadata, and tvOS 27 aborts the process when a
+                // value that large is written to UserDefaults.
+                // The file may have been partially written, so trust disk over memory.
+                invalidateCache()
+                persistenceDiagnostic = "save failed: \(diagnosticText(for: error))"
+                return false
+            }
         }
     }
 
@@ -5271,7 +5357,7 @@ enum WatchedStore {
         if !rawID.isEmpty {
             if rawID.hasPrefix("tt") {
                 keys.insert("imdb:\(rawID)")
-            } else if rawID.hasPrefix("tmdb:") || rawID.hasPrefix("trakt:") {
+            } else if rawID.hasPrefix("tmdb:") || rawID.hasPrefix("trakt:") || rawID.hasPrefix("simkl:") {
                 keys.insert(rawID)
             } else {
                 keys.insert("id:\(rawID)")
@@ -5985,6 +6071,46 @@ struct CatalogPage {
         self.hasMore = hasMore
         self.page = page
         self.nextSkip = nextSkip
+    }
+}
+
+/// Discover catalog option derived from add-on manifests and Cinemeta.
+struct DiscoverCatalogOption: Identifiable, Equatable, Hashable {
+    let key: String
+    let addonId: String
+    let addonName: String
+    let manifestURL: URL
+    let type: String
+    let catalogId: String
+    let catalogName: String
+    let genreOptions: [String]
+    let genreRequired: Bool
+    let supportsPagination: Bool
+
+    var id: String { key }
+
+    init(
+        key: String,
+        addonId: String,
+        addonName: String,
+        manifestURL: URL,
+        type: String,
+        catalogId: String,
+        catalogName: String,
+        genreOptions: [String] = [],
+        genreRequired: Bool = false,
+        supportsPagination: Bool = false
+    ) {
+        self.key = key
+        self.addonId = addonId
+        self.addonName = addonName
+        self.manifestURL = manifestURL
+        self.type = type
+        self.catalogId = catalogId
+        self.catalogName = catalogName
+        self.genreOptions = genreOptions
+        self.genreRequired = genreRequired
+        self.supportsPagination = supportsPagination
     }
 }
 

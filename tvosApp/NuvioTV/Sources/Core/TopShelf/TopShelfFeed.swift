@@ -159,21 +159,37 @@ public enum TopShelfFeedStore {
     #if canImport(UIKit)
     @MainActor
     private static func cacheArtwork(for entries: [TopShelfEntry]) async {
+        #if DEBUG
+        let start = DispatchTime.now().uptimeNanoseconds
+        print("[TVTrace] topShelf.cacheArtwork begin entries=\(entries.count) onMainActor=\(Thread.isMainThread)")
+        #endif
         for entry in entries {
             guard let destination = artworkURLDestination(for: entry),
                   !FileManager.default.fileExists(atPath: destination.path),
                   let sourceText = entry.imageURL,
                   let sourceURL = URL(string: sourceText),
                   let subtitle = entry.subtitle else { continue }
+            #if DEBUG
+            let itemStart = DispatchTime.now().uptimeNanoseconds
+            print("[TVTrace] topShelf.cacheArtwork rendering entry=\(entry.contentId)")
+            #endif
             do {
                 let (data, _) = try await URLSession.shared.data(from: sourceURL)
                 guard let image = UIImage(data: data),
                       let rendered = renderedArtwork(from: image, subtitle: subtitle) else { continue }
                 try rendered.write(to: destination, options: .atomic)
+                #if DEBUG
+                let elapsed = Double(DispatchTime.now().uptimeNanoseconds - itemStart) / 1_000_000
+                print("[TVTrace] topShelf.cacheArtwork finished entry=\(entry.contentId) size=\(rendered.count) bytes in \(String(format: "%.1f", elapsed))ms")
+                #endif
             } catch {
                 continue
             }
         }
+        #if DEBUG
+        let totalElapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+        print("[TVTrace] topShelf.cacheArtwork end totalMs=\(String(format: "%.1f", totalElapsed))")
+        #endif
         notifyTopShelfContentChanged()
     }
 

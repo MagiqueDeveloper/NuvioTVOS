@@ -546,8 +546,8 @@ Navigating vertically between catalog rows on Home (e.g. between "Popular - Seri
 
 ## AetherEngine and FFmpegBuild vendor upgrade runbook
 
-Last verified: 2026-08-31 while upgrading AetherEngine 6.47.0 to 6.57.0,
-FFmpegBuild 2.4.3 to 3.0.0, and LibDovi 2.0.0 to 2.1.0.
+Last verified: 2026-09-07 while upgrading AetherEngine 6.57.0 to 6.72.0.
+FFmpegBuild remains 3.0.0 and LibDovi remains 2.1.0.
 
 This repository does **not** consume stock AetherEngine and FFmpegBuild. It
 ships locally patched copies under `Vendor/` so AetherEngine's FFmpeg dynamic
@@ -682,8 +682,9 @@ Preserve these validated local safeguards across rebases:
   omit `bits_per_raw_sample`, preventing an 8-bit pool from truncating it.
 - `poolIs10Bit` participates in pixel-buffer-pool identity so a bit-depth change
   recreates the NV12/P010 pool correctly.
-- 4K AV1 VOD uses the device-tested dav1d thread/frame-delay policy; live,
-  lower-resolution, and 8K content keep upstream defaults.
+- 4K AV1 VOD uses the device-tested dav1d policy of up to six threads and
+  `max_frame_delay` capped to that resolved thread count (6/6 on the tested
+  Apple TV); live, lower-resolution, and 8K content keep upstream defaults.
 - `SWPerformanceSnapshot` and the on-screen `SWPERF` line retain video decode,
   conversion, audio decode, packet/frame, and film-grain diagnostics.
 - Film-grain synthesis remains at dav1d's default. Disabling it is a fidelity

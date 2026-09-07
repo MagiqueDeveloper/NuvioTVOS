@@ -1455,6 +1455,86 @@ struct SimklLibraryService {
     private static func isLibraryItem(_ item: SimklSyncItem) -> Bool {
         item.status?.lowercased() == "plantowatch"
     }
+
+    static func fetchPlanToWatchItems(
+        type: String,
+        repository: CatalogRepository,
+        store: UserDefaults = ProfileSettings.current,
+        force: Bool = false
+    ) async -> [NuvioMeta] {
+        guard SimklRuntimeSession.authenticatedState(store: store) != nil,
+              let response = await SimklSyncLoader.libraryItems(store: store, force: force) else {
+            return []
+        }
+
+        let isMovie = type == "movie"
+        let items: [SimklSyncItem]
+        if isMovie {
+            items = (response.movies ?? []).filter(isLibraryItem)
+        } else {
+            items = (response.shows ?? []).filter(isLibraryItem)
+                + (response.anime ?? []).filter(isLibraryItem)
+        }
+
+        let sortedItems = items.sorted {
+            (parseDate($0.addedToWatchlistAt) ?? .distantPast) > (parseDate($1.addedToWatchlistAt) ?? .distantPast)
+        }
+
+        var seeds: [(item: SimklSyncItem, placeholder: NuvioMeta, index: Int)] = []
+        seeds.reserveCapacity(sortedItems.count)
+        var seen = Set<String>()
+        for (index, item) in sortedItems.enumerated() {
+            guard let placeholder = placeholderMeta(item: item, type: type),
+                  seen.insert("\(type):\(placeholder.id)").inserted else { continue }
+            seeds.append((item: item, placeholder: placeholder, index: index))
+        }
+
+        let metadataConcurrency = 8
+        return await withTaskGroup(of: (Int, NuvioMeta?).self) { group in
+            var results: [Int: NuvioMeta] = [:]
+            results.reserveCapacity(seeds.count)
+            var iterator = seeds.makeIterator()
+            var inFlight = 0
+
+            func addNext() {
+                guard let entry = iterator.next() else { return }
+                inFlight += 1
+                group.addTask {
+                    let meta = (try? await repository.getMetadata(
+                        id: entry.placeholder.id,
+                        type: type
+                    )) ?? entry.placeholder
+                    return (entry.index, meta)
+                }
+            }
+
+            for _ in 0..<min(metadataConcurrency, seeds.count) { addNext() }
+            while inFlight > 0 {
+                guard let (index, meta) = await group.next() else { break }
+                inFlight -= 1
+                if let meta { results[index] = meta }
+                addNext()
+            }
+
+            return seeds.compactMap { results[$0.index] }
+        }
+    }
+}
+
+enum SimklSettingsStore {
+    static func isPlanToWatchHomeCatalogsEnabled(in store: UserDefaults = ProfileSettings.current) -> Bool {
+        store.bool(forKey: SettingsKey.simklPlanToWatchHomeCatalogs)
+    }
+
+    static var isPlanToWatchHomeCatalogsEnabled: Bool {
+        isPlanToWatchHomeCatalogsEnabled(in: ProfileSettings.current)
+    }
+
+    static func setPlanToWatchHomeCatalogsEnabled(_ enabled: Bool, store: UserDefaults = ProfileSettings.current) {
+        store.set(enabled, forKey: SettingsKey.simklPlanToWatchHomeCatalogs)
+        NotificationCenter.default.post(name: TVHomeCatalogOrder.changedNotification, object: nil)
+        NotificationCenter.default.post(name: TVHomeCatalogOrder.snapshotChangedNotification, object: nil)
+    }
 }
 
 enum SelectedLibraryService {
@@ -1817,11 +1897,12 @@ struct SimklProgressService {
                         id: entry.placeholder.id,
                         type: entry.seed.type
                     )) ?? entry.placeholder
-                    let duration = runtimeSeconds(meta.runtime) ?? 100
+                    let duration = runtimeSeconds(for: meta)
+                    let position = max(1.0, min(duration * entry.progress / 100, max(duration - 5, 1.0)))
                     let item = ContinueWatchingItem(
                         meta: meta,
                         streamUrl: "",
-                        position: duration * entry.progress / 100,
+                        position: position,
                         duration: duration,
                         lastWatchedAt: entry.pausedAt ?? Date(),
                         season: entry.season,
@@ -1943,7 +2024,7 @@ struct SimklProgressService {
             season: next.season,
             episode: next.episode
         )
-        let duration = max(runtimeSeconds(meta.runtime) ?? 100, 120)
+        let duration = max(runtimeSeconds(for: meta), 120)
         return ContinueWatchingItem(
             meta: meta,
             streamUrl: "",
@@ -2486,8 +2567,17 @@ private func iso8601(_ date: Date) -> String {
     return formatter.string(from: date)
 }
 
-private func runtimeSeconds(_ runtime: String?) -> Double? {
-    guard let runtime else { return nil }
-    let value = runtime.split(whereSeparator: { !$0.isNumber }).first.flatMap { Double($0) }
-    return value.map { $0 * 60 }
+func runtimeSeconds(for meta: NuvioMeta) -> Double {
+    if let stored = ContinueWatchingStore.item(for: meta.id)?.duration, stored >= 60 {
+        return stored
+    }
+    let fallback = meta.isSeries ? 45.0 * 60.0 : 120.0 * 60.0
+    guard let raw = meta.runtime?.lowercased(), !raw.isEmpty else { return fallback }
+    let values = raw.split(whereSeparator: { !$0.isNumber }).compactMap { Double($0) }
+    guard let first = values.first else { return fallback }
+    if raw.contains("h") {
+        let minutes = values.count > 1 ? values[1] : 0
+        return max((first * 60 + minutes) * 60, 60)
+    }
+    return max(first * 60, 60)
 }

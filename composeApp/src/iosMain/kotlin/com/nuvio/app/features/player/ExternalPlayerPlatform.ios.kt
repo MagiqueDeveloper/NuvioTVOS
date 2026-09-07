@@ -19,8 +19,14 @@ private val iosExternalPlayerSpecs = listOf(
             buildString {
                 append("infuse://x-callback-url/play?url=")
                 append(request.sourceUrl.urlQueryEncode())
+                val baseTitle = request.buildPlayerTitle(includeEpisodeTitle = true)
+                val filename = if (baseTitle.contains('.')) baseTitle else "$baseTitle.mp4"
                 append("&filename=")
-                append(request.buildPlayerTitle(includeEpisodeTitle = true).urlQueryEncode())
+                append(filename.urlQueryEncode())
+                if (request.resumePositionMs > 0L) {
+                    append("&position=")
+                    append(request.resumePositionMs / 1000L)
+                }
                 request.subtitles?.forEach { subtitle ->
                     append("&sub=")
                     append(subtitle.url.urlQueryEncode())

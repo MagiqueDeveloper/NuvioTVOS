@@ -22,6 +22,12 @@ final class PlaybackStartupBenchmark {
     private(set) var t2_debridResolved: Date?
     private(set) var t3_playbackStarted: Date?
 
+    // Engine startup breakdown checkpoints
+    private var t_sourceOpened: Date?
+    private var t_streamsProbed: Date?
+    private var t_displayPrepared: Date?
+    private var t_sessionConstructed: Date?
+
     private init() {}
 
     func start(title: String = "") {
@@ -32,6 +38,10 @@ final class PlaybackStartupBenchmark {
         self.t1_sourcePicked = nil
         self.t2_debridResolved = nil
         self.t3_playbackStarted = nil
+        self.t_sourceOpened = nil
+        self.t_streamsProbed = nil
+        self.t_displayPrepared = nil
+        self.t_sessionConstructed = nil
         let target = title.isEmpty ? "playback" : "\"\(title)\""
         print("[StartupBenchmark] ⏱ [0/3] Started startup timer for \(target)")
     }
@@ -56,6 +66,23 @@ final class PlaybackStartupBenchmark {
         print("[StartupBenchmark] ⚡️ [2/3] Debrid link resolved in \(String(format: "%.3fs", debridDuration)) (elapsed: \(String(format: "%.3fs", totalSoFar)))")
     }
 
+    func markEngineCheckpoint(_ name: String) {
+        guard t0_initiated != nil, t3_playbackStarted == nil else { return }
+        let now = Date()
+        switch name {
+        case "sourceOpened":
+            if t_sourceOpened == nil { t_sourceOpened = now }
+        case "streamsProbed":
+            if t_streamsProbed == nil { t_streamsProbed = now }
+        case "displayPrepared":
+            if t_displayPrepared == nil { t_displayPrepared = now }
+        case "sessionConstructed":
+            if t_sessionConstructed == nil { t_sessionConstructed = now }
+        default:
+            break
+        }
+    }
+
     @discardableResult
     func markPlaybackStarted() -> TimeInterval? {
         guard let t0 = t0_initiated, t3_playbackStarted == nil else { return nil }
@@ -72,6 +99,26 @@ final class PlaybackStartupBenchmark {
         }()
         let engineBase = t2_debridResolved ?? t1_sourcePicked ?? t0
         let engineDuration = now.timeIntervalSince(engineBase)
+
+        let cdnDuration: Double? = {
+            guard let opened = t_sourceOpened else { return nil }
+            return max(0, opened.timeIntervalSince(engineBase))
+        }()
+        let probeDuration: Double? = {
+            guard let probed = t_streamsProbed else { return nil }
+            let prev = t_sourceOpened ?? engineBase
+            return max(0, probed.timeIntervalSince(prev))
+        }()
+        let displayDuration: Double? = {
+            guard let display = t_displayPrepared else { return nil }
+            let prev = t_streamsProbed ?? t_sourceOpened ?? engineBase
+            return max(0, display.timeIntervalSince(prev))
+        }()
+        let bufferDuration: Double? = {
+            let prev = t_displayPrepared ?? t_streamsProbed ?? t_sourceOpened
+            guard let prev else { return nil }
+            return max(0, now.timeIntervalSince(prev))
+        }()
 
         var lines: [String] = []
         lines.append("\n============================================================")
@@ -91,6 +138,20 @@ final class PlaybackStartupBenchmark {
         } else {
             lines.append("  2. Engine Startup:    \(String(format: "%.3fs", engineDuration))  (player buffer & first frame)")
         }
+
+        if let cdn = cdnDuration, cdn >= 0.05 {
+            lines.append("     ├─ CDN First Byte: \(String(format: "%.3fs", cdn))  (connection & initial data)")
+        }
+        if let probe = probeDuration, probe >= 0.05 {
+            lines.append("     ├─ Stream Probe:   \(String(format: "%.3fs", probe))  (demux container & tracks)")
+        }
+        if let display = displayDuration, display >= 0.05 {
+            lines.append("     ├─ HDMI Handshake: \(String(format: "%.3fs", display))  (tvOS match rate & range)")
+        }
+        if let buffer = bufferDuration, buffer >= 0.05 {
+            lines.append("     └─ Mux & Buffer:   \(String(format: "%.3fs", buffer))  (HLS segment 0 & AVPlayer)")
+        }
+
         lines.append("  ----------------------------------------------------------")
         lines.append("  ⏱ TOTAL TIME TO PLAY: \(String(format: "%.3fs", totalDuration))")
         lines.append("============================================================\n")
@@ -107,6 +168,10 @@ final class PlaybackStartupBenchmark {
         t1_sourcePicked = nil
         t2_debridResolved = nil
         t3_playbackStarted = nil
+        t_sourceOpened = nil
+        t_streamsProbed = nil
+        t_displayPrepared = nil
+        t_sessionConstructed = nil
     }
 }
 

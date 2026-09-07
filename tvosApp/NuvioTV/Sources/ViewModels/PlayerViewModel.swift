@@ -1232,6 +1232,10 @@ class PlayerViewModel: ObservableObject {
     /// at the last known position.
     private func recoverExpiredStream() {
         if let url = activeStreamURL { failedStreamURLs.insert(url) }
+        if let meta = activeMeta {
+            let numbers = resolvedEpisodeNumbers
+            LastPlaybackStreamStore.remove(metaId: meta.id, season: numbers?.season, episode: numbers?.episode)
+        }
         attemptFailover(
             reason: "This stream link has expired. Go back and start it again to load a fresh stream.",
             toast: nil
@@ -1271,6 +1275,10 @@ class PlayerViewModel: ObservableObject {
             if let url = self.activeStreamURL {
                 self.failedStreamURLs.insert(url)
             }
+            if let meta = self.activeMeta {
+                let numbers = self.resolvedEpisodeNumbers
+                LastPlaybackStreamStore.remove(metaId: meta.id, season: numbers?.season, episode: numbers?.episode)
+            }
             self.attemptFailover(
                 reason: "The source didn't start within \(self.loadTimeoutSeconds) seconds. Every available source was tried.",
                 toast: nil
@@ -1291,6 +1299,17 @@ class PlayerViewModel: ObservableObject {
 
     private var storedResumePositionForActiveItem: Double? {
         guard let meta = activeMeta else { return nil }
+        if RemoteTrackingState.isProgressSourceAuthenticated {
+            guard let item = TraktProgressService.currentContinueWatchingItem(for: meta),
+                  !item.isUpNextEntry else { return nil }
+            if meta.isSeries {
+                guard let numbers = resolvedEpisodeNumbers else { return item.resumePosition }
+                if let itemSeason = item.season, let itemEpisode = item.episode {
+                    guard itemSeason == numbers.season && itemEpisode == numbers.episode else { return nil }
+                }
+            }
+            return item.resumePosition
+        }
         if meta.isSeries {
             let numbers = resolvedEpisodeNumbers
             return ContinueWatchingStore.resumePosition(
@@ -1321,6 +1340,11 @@ class PlayerViewModel: ObservableObject {
             return
         }
 
+        if let meta = activeMeta {
+            let numbers = resolvedEpisodeNumbers
+            LastPlaybackStreamStore.remove(metaId: meta.id, season: numbers?.season, episode: numbers?.episode)
+        }
+
         let decision = LiveStreamFailoverPolicy.decide(
             isLive: isLiveStream,
             currentURL: activeStreamURL,
@@ -1345,9 +1369,13 @@ class PlayerViewModel: ObservableObject {
         engine.pausePlayback()
         if let toast { showPlayerToast(toast) }
 
-        // Prefer the last stable position (slate/error ticks can lie).
-        let resume = lastStablePlaybackTime?.current
-            ?? (time.current > 5 ? time.current : nil)
+        // Prefer the last stable position from genuine playback; if the stream failed/expired
+        // before stable playback, keep the initial resume target or fall back to store.
+        let stableCurrent = (lastStablePlaybackTime?.current).flatMap { $0 > 0 ? $0 : nil }
+        let liveCurrent = (time.current > 5 && !loadedStreamLooksLikeReplacement()) ? time.current : nil
+        let resume = stableCurrent
+            ?? liveCurrent
+            ?? pendingResumeSeconds
             ?? storedResumePositionForActiveItem
 
         let excluded = decision.exclusions
@@ -1595,10 +1623,12 @@ class PlayerViewModel: ObservableObject {
                 >= Self.explicitSeekSettleWindow
             return !seekConfirmed && !protectionExpired
         }()
+        let isReplacementSlate = subtitle != PlaybackMarkers.trailerSubtitle && !isLiveStream && loadedStreamLooksLikeReplacement()
         if !isLiveStream,
            c.hasCoherentTimeSample,
            !c.isPlayerLoading,
            !c.isAtEndOfFile,
+           !isReplacementSlate,
            latestTime.duration > 0,
            latestTime.current >= 0,
            latestTime.current < latestTime.duration {
@@ -1724,6 +1754,10 @@ class PlayerViewModel: ObservableObject {
         // mpv hard-failed this source — try the next one before surfacing UI.
         if !c.currentErrorMessage.isEmpty, !isFailingOver, !isReloadingStream {
             if let url = activeStreamURL { failedStreamURLs.insert(url) }
+            if let meta = activeMeta {
+                let numbers = resolvedEpisodeNumbers
+                LastPlaybackStreamStore.remove(metaId: meta.id, season: numbers?.season, episode: numbers?.episode)
+            }
             attemptFailover(
                 reason: c.currentErrorMessage,
                 toast: nil
@@ -3302,6 +3336,7 @@ class PlayerViewModel: ObservableObject {
               time.duration > 0 else {
             return
         }
+        guard !loadedStreamLooksLikeReplacement() else { return }
 
         didApplyResume = true
         seek(to: min(pendingResumeSeconds, max(time.duration - 5, 0)))
@@ -3339,7 +3374,9 @@ class PlayerViewModel: ObservableObject {
               progressTime.current < progressTime.duration,
               subtitle != PlaybackMarkers.trailerSubtitle,
               !loadedStreamLooksLikeReplacement(),
-              force || progressTime.current >= minimumProgressSeconds else {
+              !didDetectReplacementStream,
+              !isAwaitingStreamStart || didApplyResume,
+              progressTime.current >= minimumProgressSeconds || (force && didApplyResume && progressTime.current > 5) else {
             return
         }
 
@@ -3644,6 +3681,12 @@ class PlayerViewModel: ObservableObject {
 
         didDetectReplacementStream = true
         engine.pausePlayback()
+        lastStablePlaybackTime = nil
+        explicitSeekProgressCheckpoint = nil
+        if let meta = activeMeta {
+            let numbers = resolvedEpisodeNumbers
+            LastPlaybackStreamStore.remove(metaId: meta.id, season: numbers?.season, episode: numbers?.episode)
+        }
         // Try to silently reload a fresh link before surfacing the error.
         recoverExpiredStream()
         return true

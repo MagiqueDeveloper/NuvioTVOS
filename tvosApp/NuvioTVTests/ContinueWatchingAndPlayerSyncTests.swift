@@ -132,6 +132,7 @@ final class ContinueWatchingAndPlayerSyncTests: XCTestCase {
         XCTAssertTrue(localKeys.contains(SettingsKey.playerShowPiP))
         XCTAssertTrue(localKeys.contains(SettingsKey.playerShowEpisodes))
         XCTAssertTrue(localKeys.contains(SettingsKey.playerShowSources))
+        XCTAssertTrue(localKeys.contains(SettingsKey.playerShowSubtitles))
 
         let remoteKeys = PlayerSettingsSyncMapper.remoteToLocalKeyMappings.map(\.remote)
         XCTAssertTrue(remoteKeys.contains("preferred_audio_language"))
@@ -151,6 +152,139 @@ final class ContinueWatchingAndPlayerSyncTests: XCTestCase {
         XCTAssertTrue(remoteKeys.contains("player_show_pip"))
         XCTAssertTrue(remoteKeys.contains("player_show_episodes"))
         XCTAssertTrue(remoteKeys.contains("player_show_sources"))
+        XCTAssertTrue(remoteKeys.contains("player_show_subtitles"))
+    }
+
+    func testAutoPlayModeWireMapping() {
+        XCTAssertEqual(PlayerSettingsSyncMapper.autoPlayModeToWire(useTopResult: true, smartSelection: true, existingWireMode: nil), "FIRST_STREAM")
+        XCTAssertEqual(PlayerSettingsSyncMapper.autoPlayModeToWire(useTopResult: false, smartSelection: true, existingWireMode: nil), "MANUAL")
+        XCTAssertEqual(PlayerSettingsSyncMapper.autoPlayModeToWire(useTopResult: false, smartSelection: false, existingWireMode: "REGEX_MATCH"), "REGEX_MATCH")
+        XCTAssertEqual(PlayerSettingsSyncMapper.autoPlayModeToWire(useTopResult: true, smartSelection: true, existingWireMode: "REGEX_MATCH"), "FIRST_STREAM")
+
+        let first = PlayerSettingsSyncMapper.autoPlayModeFromWire("FIRST_STREAM")
+        XCTAssertEqual(first?.useTopResult, true)
+        XCTAssertEqual(first?.smartSelection, true)
+
+        let manual = PlayerSettingsSyncMapper.autoPlayModeFromWire("MANUAL")
+        XCTAssertEqual(manual?.useTopResult, false)
+        XCTAssertEqual(manual?.smartSelection, false)
+
+        let regex = PlayerSettingsSyncMapper.autoPlayModeFromWire("REGEX_MATCH")
+        XCTAssertEqual(regex?.useTopResult, false)
+        XCTAssertEqual(regex?.smartSelection, false)
+
+        XCTAssertNil(PlayerSettingsSyncMapper.autoPlayModeFromWire(nil))
+        XCTAssertNil(PlayerSettingsSyncMapper.autoPlayModeFromWire(""))
+    }
+
+    func testPlayerSettingsExportAutoPlayFirstSource() {
+        let testProfileId = "test_player_export_\(UUID().uuidString)"
+        let store = ProfileSettings.store(for: testProfileId)
+        defer {
+            store.removeObject(forKey: SettingsKey.smartStreamUseTopResult)
+            store.removeObject(forKey: SettingsKey.smartStreamSelection)
+        }
+
+        store.set(true, forKey: SettingsKey.smartStreamUseTopResult)
+        store.set(true, forKey: SettingsKey.smartStreamSelection)
+
+        let exported = PlayerSettingsSyncMapper.exportPayload(
+            localProfileId: testProfileId,
+            existing: nil,
+            encodeValue: { val in ["type": "mock", "value": val] }
+        )
+
+        let modeDict = exported[PlayerSettingsSyncMapper.streamAutoPlayModeRemoteKey] as? [String: Any]
+        XCTAssertEqual(modeDict?["value"] as? String, "FIRST_STREAM")
+
+        let topDict = exported[PlayerSettingsSyncMapper.smartStreamUseTopResultRemoteKey] as? [String: Any]
+        XCTAssertEqual(topDict?["value"] as? Bool, true)
+
+        store.set(false, forKey: SettingsKey.smartStreamUseTopResult)
+        let exportedManual = PlayerSettingsSyncMapper.exportPayload(
+            localProfileId: testProfileId,
+            existing: exported,
+            encodeValue: { val in ["type": "mock", "value": val] }
+        )
+
+        let modeDictManual = exportedManual[PlayerSettingsSyncMapper.streamAutoPlayModeRemoteKey] as? [String: Any]
+        XCTAssertEqual(modeDictManual?["value"] as? String, "MANUAL")
+
+        let topDictManual = exportedManual[PlayerSettingsSyncMapper.smartStreamUseTopResultRemoteKey] as? [String: Any]
+        XCTAssertEqual(topDictManual?["value"] as? Bool, false)
+    }
+
+    func testPlayerSettingsImportAutoPlayFirstSource() {
+        let testProfileId = "test_player_import_\(UUID().uuidString)"
+        let store = ProfileSettings.store(for: testProfileId)
+        defer {
+            store.removeObject(forKey: SettingsKey.smartStreamUseTopResult)
+            store.removeObject(forKey: SettingsKey.smartStreamSelection)
+        }
+
+        // Import FIRST_STREAM from remote (Android TV / mobile / desktop / website)
+        let remoteFirstStream: [String: Any] = [
+            PlayerSettingsSyncMapper.streamAutoPlayModeRemoteKey: [
+                "type": "string",
+                "value": "FIRST_STREAM"
+            ]
+        ]
+        PlayerSettingsSyncMapper.importPayload(
+            remoteFirstStream,
+            localProfileId: testProfileId,
+            decodeValue: { dict in dict["value"] }
+        )
+        XCTAssertEqual(store.bool(forKey: SettingsKey.smartStreamUseTopResult), true)
+        XCTAssertEqual(store.bool(forKey: SettingsKey.smartStreamSelection), true)
+
+        // Import MANUAL from remote (without explicit smart_stream_selection)
+        let remoteManual: [String: Any] = [
+            PlayerSettingsSyncMapper.streamAutoPlayModeRemoteKey: [
+                "type": "string",
+                "value": "MANUAL"
+            ]
+        ]
+        PlayerSettingsSyncMapper.importPayload(
+            remoteManual,
+            localProfileId: testProfileId,
+            decodeValue: { dict in dict["value"] }
+        )
+        XCTAssertEqual(store.bool(forKey: SettingsKey.smartStreamUseTopResult), false)
+        XCTAssertEqual(store.bool(forKey: SettingsKey.smartStreamSelection), false)
+
+        // Import MANUAL with explicit tvOS peer smart_stream_selection: true
+        let remoteManualWithTvSmart: [String: Any] = [
+            PlayerSettingsSyncMapper.streamAutoPlayModeRemoteKey: [
+                "type": "string",
+                "value": "MANUAL"
+            ],
+            PlayerSettingsSyncMapper.smartStreamSelectionRemoteKey: [
+                "type": "boolean",
+                "value": true
+            ]
+        ]
+        PlayerSettingsSyncMapper.importPayload(
+            remoteManualWithTvSmart,
+            localProfileId: testProfileId,
+            decodeValue: { dict in dict["value"] }
+        )
+        XCTAssertEqual(store.bool(forKey: SettingsKey.smartStreamUseTopResult), false)
+        XCTAssertEqual(store.bool(forKey: SettingsKey.smartStreamSelection), true)
+
+        // Legacy fallback: smart_stream_use_top_result without stream_auto_play_mode
+        let remoteLegacyFallback: [String: Any] = [
+            PlayerSettingsSyncMapper.smartStreamUseTopResultRemoteKey: [
+                "type": "boolean",
+                "value": true
+            ]
+        ]
+        PlayerSettingsSyncMapper.importPayload(
+            remoteLegacyFallback,
+            localProfileId: testProfileId,
+            decodeValue: { dict in dict["value"] }
+        )
+        XCTAssertEqual(store.bool(forKey: SettingsKey.smartStreamUseTopResult), true)
+        XCTAssertEqual(store.bool(forKey: SettingsKey.smartStreamSelection), true)
     }
 
     // MARK: - MDBList Settings Sync Tests

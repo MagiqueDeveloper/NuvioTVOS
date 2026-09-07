@@ -22,6 +22,55 @@ struct TeletextPageSwitchRequest {
     let delayMilliseconds: Int
 }
 
+/// A host nudging the audio delay on a session that is already playing (AE#464). Milliseconds,
+/// because that is the unit a lip-sync control is reasoned about in. The delay is what makes the run
+/// a test of the runtime path, which is the interesting half: at load the offset is just a number
+/// handed to a muxer or a decoder, while mid-session it has to reach media the session has already
+/// committed to the previous value.
+struct AudioDelaySwitchRequest {
+    let milliseconds: Int
+    let delayMilliseconds: Int
+}
+
+/// A host correcting a `LoadOption` on a session that is already playing (#460). The delay is what
+/// makes the run a test of the runtime path rather than of the load option: it has to land on a
+/// session that is playing, or the run proves nothing the load option did not already prove.
+struct LoadOptionCorrectionRequest {
+    let changes: [LoadOptionChange]
+    let delayMilliseconds: Int
+}
+
+/// The corrections the harness can drive. Deliberately a short list of levers whose effect is
+/// visible from a CLI run, plus `isLive`, which exists to drive the refusal path: a load-identity
+/// field has to be observably refused, not observably ignored.
+enum LoadOptionChange {
+    case header(name: String, value: String)
+    case audioBridgeMode(AudioBridgeMode)
+    case preferredAudioLanguages([String])
+    case decodePath(DecodePath)
+    case isLive(Bool)
+
+    var label: String {
+        switch self {
+        case .header(let name, _): return "httpHeaders[\(name)]"
+        case .audioBridgeMode(let mode): return "audioBridgeMode=\(mode.rawValue)"
+        case .preferredAudioLanguages(let langs): return "preferredAudioLanguages=\(langs.joined(separator: ","))"
+        case .decodePath(let path): return "preferredDecodePath=\(path.rawValue)"
+        case .isLive(let value): return "isLive=\(value)"
+        }
+    }
+
+    func apply(to options: inout LoadOptions) {
+        switch self {
+        case .header(let name, let value): options.httpHeaders[name] = value
+        case .audioBridgeMode(let mode): options.audioBridgeMode = mode
+        case .preferredAudioLanguages(let langs): options.preferredAudioLanguages = langs
+        case .decodePath(let path): options.preferredDecodePath = path
+        case .isLive(let value): options.isLive = value
+        }
+    }
+}
+
 /// Full playback-session smoke test: load a URL exactly like a host app (VOD by
 /// default, `--live` for the live path), autoplay, print 1 Hz transport telemetry,
 /// and optionally activate an embedded subtitle track (`--subs <codec-or-lang>`)
@@ -31,8 +80,13 @@ func runPlay(url: URL, seconds: Double, live: Bool, nativeHLS: Bool = false, liv
                     censusThresholdMB: Int? = nil, censusHz: Double? = nil, frameTimes: Bool = false, pictureProbe: Bool = false,
                     sidecars: [ExternalSubtitleTrack] = [], audioSwitch: AudioSwitchRequest? = nil,
                     teletextPage: Int? = nil, teletextSwitch: TeletextPageSwitchRequest? = nil,
+                    audioDelayMs: Int = 0, audioDelaySwitches: [AudioDelaySwitchRequest] = [],
+                    pausedMount: Bool = false,
+                    optionCorrection: LoadOptionCorrectionRequest? = nil,
                     sequentialOrigin: Bool = false, maxConcurrentRequests: Int? = nil, declaredDuration: Double? = nil,
-                    httpHeaders: [String: String] = [:]) -> Int32 {
+                    httpHeaders: [String: String] = [:],
+                    deinterlaceFieldRate: DeinterlaceFieldRate = .field,
+                    assertDolbyVision: Bool = false) -> Int32 {
     EngineLog.handler = { print($0) }
     if mallocCensus {
         AetherEngine.setLargeAllocationCensusEnabled(
@@ -40,7 +94,10 @@ func runPlay(url: URL, seconds: Double, live: Bool, nativeHLS: Bool = false, liv
             triggerThresholdMB: censusThresholdMB ?? 32,
             triggerPollHz: censusHz ?? 8)
     }
-    if forceSoftware { AetherEngine.setForceSoftwarePathForTesting(true) }
+    // AE#461: `play --sw` drives `LoadOptions.preferredDecodePath`, the shipping per-session lever,
+    // rather than the process-global test hook it used before. The hook forces every session on the
+    // engine, so it could never exercise the thing a host actually calls.
+    if forceSoftware { print("[aetherctl] decode path: preferredDecodePath=.software (#461)") }
     if let audioSwitch {
         print("[aetherctl] audio switch: selectAudioTrack(index: \(audioSwitch.index)) "
               + "\(audioSwitch.delayMilliseconds) ms after the load returns")
@@ -50,7 +107,7 @@ func runPlay(url: URL, seconds: Double, live: Bool, nativeHLS: Bool = false, liv
     // CFRunLoopRun, not a blocking semaphore: AetherEngine is @MainActor, so parking the main thread would deadlock the executor.
     let box = UncheckedBox<Int32?>(nil)
     Task { @MainActor in
-        box.value = await playSmokeTest(url: url, seconds: seconds, live: live, nativeHLS: nativeHLS, liveIngest: liveIngest, fastZap: fastZap, liveStartImmediately: liveStartImmediately, dvrWindow: dvrWindow, subsPick: subsPick, hostCalls: hostCalls, audioStats: audioStats, seekEvery: seekEvery, seekPattern: seekPattern, seekCount: seekCount, startPosition: startPosition, frameTimes: frameTimes, pictureProbe: pictureProbe, sidecars: sidecars, audioSwitch: audioSwitch, teletextPage: teletextPage, teletextSwitch: teletextSwitch, sequentialOrigin: sequentialOrigin, maxConcurrentRequests: maxConcurrentRequests, declaredDuration: declaredDuration, httpHeaders: httpHeaders)
+        box.value = await playSmokeTest(url: url, seconds: seconds, live: live, forceSoftware: forceSoftware, nativeHLS: nativeHLS, liveIngest: liveIngest, fastZap: fastZap, liveStartImmediately: liveStartImmediately, dvrWindow: dvrWindow, subsPick: subsPick, hostCalls: hostCalls, audioStats: audioStats, seekEvery: seekEvery, seekPattern: seekPattern, seekCount: seekCount, startPosition: startPosition, frameTimes: frameTimes, pictureProbe: pictureProbe, sidecars: sidecars, audioSwitch: audioSwitch, teletextPage: teletextPage, teletextSwitch: teletextSwitch, audioDelayMs: audioDelayMs, audioDelaySwitches: audioDelaySwitches, pausedMount: pausedMount, optionCorrection: optionCorrection, sequentialOrigin: sequentialOrigin, maxConcurrentRequests: maxConcurrentRequests, declaredDuration: declaredDuration, httpHeaders: httpHeaders, deinterlaceFieldRate: deinterlaceFieldRate, assertDolbyVision: assertDolbyVision)
         CFRunLoopStop(CFRunLoopGetMain())
     }
     CFRunLoopRun()
@@ -235,7 +292,7 @@ private func seekIntentDrill(
 }
 
 @MainActor
-private func playSmokeTest(url: URL, seconds: Double, live: Bool, nativeHLS: Bool = false, liveIngest: Bool = false, fastZap: Bool = false, liveStartImmediately: Bool = true, dvrWindow: Double?, subsPick: String?, hostCalls: [String], audioStats: Bool, seekEvery: Double? = nil, seekPattern: [Double] = [], seekCount: Int? = nil, startPosition: Double? = nil, frameTimes: Bool = false, pictureProbe: Bool = false, sidecars: [ExternalSubtitleTrack] = [], audioSwitch: AudioSwitchRequest? = nil, teletextPage: Int? = nil, teletextSwitch: TeletextPageSwitchRequest? = nil, sequentialOrigin: Bool = false, maxConcurrentRequests: Int? = nil, declaredDuration: Double? = nil, httpHeaders: [String: String] = [:]) async -> Int32 {
+private func playSmokeTest(url: URL, seconds: Double, live: Bool, forceSoftware: Bool = false, nativeHLS: Bool = false, liveIngest: Bool = false, fastZap: Bool = false, liveStartImmediately: Bool = true, dvrWindow: Double?, subsPick: String?, hostCalls: [String], audioStats: Bool, seekEvery: Double? = nil, seekPattern: [Double] = [], seekCount: Int? = nil, startPosition: Double? = nil, frameTimes: Bool = false, pictureProbe: Bool = false, sidecars: [ExternalSubtitleTrack] = [], audioSwitch: AudioSwitchRequest? = nil, teletextPage: Int? = nil, teletextSwitch: TeletextPageSwitchRequest? = nil, audioDelayMs: Int = 0, audioDelaySwitches: [AudioDelaySwitchRequest] = [], pausedMount: Bool = false, optionCorrection: LoadOptionCorrectionRequest? = nil, sequentialOrigin: Bool = false, maxConcurrentRequests: Int? = nil, declaredDuration: Double? = nil, httpHeaders: [String: String] = [:], deinterlaceFieldRate: DeinterlaceFieldRate = .field, assertDolbyVision: Bool = false) async -> Int32 {
     let engine: AetherEngine
     do {
         engine = try AetherEngine()
@@ -314,6 +371,10 @@ private func playSmokeTest(url: URL, seconds: Double, live: Bool, nativeHLS: Boo
     let options = LoadOptions(
         suppressDisplayCriteria: true,
         httpHeaders: httpHeaders,
+        // AE#493: the Dolby Vision claim a macOS host has to make itself, because there is no per-mode
+        // capability API to read there. Without the flag a Mac run cannot exercise the DV route at all,
+        // which is how the reporter ended up A/B-ing a local patch instead of a session option.
+        panelPresentsDolbyVision: assertDolbyVision,
         isLive: live,
         dvrWindowSeconds: dvrWindow,
         liveJoinProfile: fastZap ? .fastZap : .standard,
@@ -323,7 +384,17 @@ private func playSmokeTest(url: URL, seconds: Double, live: Bool, nativeHLS: Boo
         maxConcurrentSourceRequests: maxConcurrentRequests,
         declaredDurationSeconds: declaredDuration,
         externalSubtitles: sidecars,
-        teletextPage: teletextPage
+        // AE#464 round 2: the reporter's mount. A host that drives transport itself loads with
+        // autoplay off and calls play() next to its own load; a rebuild the ENGINE raises has no
+        // such caller, which is what made a mid-play nudge settle paused and stay there.
+        autoplay: !pausedMount,
+        teletextPage: teletextPage,
+        audioDelaySeconds: Double(audioDelayMs) / 1000.0,   // AE#464
+        // AE#492: the field-rate lever was reachable from no harness at all, so the one A/B that
+        // separates "the deinterlaced path loses frames" from "it emits 2.5x as many of them" could
+        // only be asked of a reporter. send_frame halves the output rate and changes nothing else.
+        deinterlaceFieldRate: deinterlaceFieldRate,
+        preferredDecodePath: forceSoftware ? .software : .automatic
     )
     // #311: installed BEFORE the load on purpose. The engine holds it and arms the host it builds,
     // which is the documented usage and the part a host would otherwise have to re-do per load.
@@ -401,12 +472,12 @@ private func playSmokeTest(url: URL, seconds: Double, live: Bool, nativeHLS: Boo
             // off the transport itself, not off anything the engine remembers.
             print("  HOSTCALL setRate(\(Issue436RateHold.rate)) (held across a pause/resume)")
             engine.setRate(Issue436RateHold.rate)
-        case "reloadlive", "seekback", "overlapseek", "ratehold-tail":
-            break  // reloadlive handled at load time, seekback/overlapseek in the telemetry loop
+        case "reloadlive", "seekback", "overlapseek", "ratehold-tail", "pauseseek":
+            break  // reloadlive handled at load time, seekback/overlapseek/pauseseek in the telemetry loop
         case let call where call.hasPrefix("seekfar"):
             break  // #433, in the telemetry loop; `seekfar@N` picks the tick
         default:
-            print("  HOSTCALL unknown '\(call)' (use play,extractor,setrate,ratehold,reloadlive,seekback,seekfar,overlapseek)")
+            print("  HOSTCALL unknown '\(call)' (use play,extractor,setrate,ratehold,reloadlive,seekback,seekfar,overlapseek,pauseseek)")
         }
     }
     defer { if let frameExtractor { Task { await frameExtractor.shutdown() } } }
@@ -432,6 +503,19 @@ private func playSmokeTest(url: URL, seconds: Double, live: Bool, nativeHLS: Boo
     // shape as the audio switch below, for the same reason: the delay has to be elapsed time next to
     // a running session, and here it also has to outlast the subtitle selection, or the run measures
     // the load option it was already able to measure before.
+    // AE#464 round 2: repeatable, because a stepper press is repeatable. Three of them inside
+    // one runloop turn is the leg that stacked three reloads and lost the playhead.
+    for audioDelaySwitch in audioDelaySwitches {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, audioDelaySwitch.delayMilliseconds)) * 1_000_000)
+            print("  HOSTCALL setAudioDelay(\(audioDelaySwitch.milliseconds) ms) at "
+                  + "+\(audioDelaySwitch.delayMilliseconds) ms "
+                  + "(was \(Int((engine.audioDelaySeconds * 1000).rounded())) ms, "
+                  + "route=\(engine.videoRoute.rawValue), t=\(String(format: "%.2f", engine.currentTime))s)")
+            engine.setAudioDelay(Double(audioDelaySwitch.milliseconds) / 1000.0)
+        }
+    }
+
     if let teletextSwitch {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(max(0, teletextSwitch.delayMilliseconds)) * 1_000_000)
@@ -439,6 +523,33 @@ private func playSmokeTest(url: URL, seconds: Double, live: Bool, nativeHLS: Boo
             print("  HOSTCALL setTeletextPage(\(target)) at +\(teletextSwitch.delayMilliseconds) ms "
                   + "(was \(engine.teletextPage.map(String.init) ?? "auto"))")
             engine.setTeletextPage(teletextSwitch.page)
+        }
+    }
+
+    // #460: the host correcting an option on a session that is already playing, through the
+    // session-preserving reload rather than a fresh load. Same detached shape as the switches
+    // above. Both outcomes are printed: a correction that was applied and one that was refused are
+    // exactly the pair a host's recovery ladder has to tell apart.
+    if let optionCorrection {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, optionCorrection.delayMilliseconds)) * 1_000_000)
+            let labels = optionCorrection.changes.map(\.label).joined(separator: ", ")
+            let before = engine.currentTime
+            print("  HOSTCALL reloadAtCurrentPosition(applying: \(labels)) at +\(optionCorrection.delayMilliseconds) ms "
+                  + "(t=\(String(format: "%.2f", before))s)")
+            do {
+                try await engine.reloadAtCurrentPosition { options in
+                    for change in optionCorrection.changes { change.apply(to: &options) }
+                }
+                // The clock republishes on the tick after the load returns, so reading it here
+                // prints 0 and reads like a restart the session never took. Let one tick land.
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                print("  #460 correction applied, session resumed at "
+                      + "\(String(format: "%.2f", engine.currentTime))s from \(String(format: "%.2f", before))s "
+                      + "(state=\(engine.state))")
+            } catch {
+                print("  #460 correction refused: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -472,6 +583,10 @@ private func playSmokeTest(url: URL, seconds: Double, live: Bool, nativeHLS: Boo
     // internal reroute can have moved this run off the route the flags asked for.
     print("backend=\(engine.playbackBackend.rawValue) route=\(engine.videoRoute.rawValue) "
           + "duration=\(String(format: "%.1f", engine.duration))s isLive=\(engine.isLive)")
+    // AE#462: the typed delivery next to the human label, because they answer different questions:
+    // the label names the pipeline, the delivery says whether there is one at all.
+    print("audio delivery=\(engine.audioDelivery.rawValue) "
+          + "pipeline=\(engine.activeAudioDecoder ?? "none") tracks=\(engine.audioTracks.count)")
     if frameTimes {
         if let timebase = engine.softwarePresentationTimebase {
             print(String(format: "  timebase: present, time=%.3fs rate=%.2f", timebase.time.seconds, timebase.rate))
@@ -542,12 +657,23 @@ private func playSmokeTest(url: URL, seconds: Double, live: Bool, nativeHLS: Boo
         // AE#418: the picture states its own source time, so `axisErr` is what AVPlayer did with the
         // segment rather than what the producer wrote, and `capErr` is the same error as a host
         // placing a cue at `sourceTime` would make it.
+        //
+        // The two errors do not have the same resolution, and only one of them says so without help.
+        // `axisErr` differences two frame-grid values read out of one `copyPixelBuffer` call, so it is
+        // a whole number of frames and every digit of it is a reading. `capErr` differences the same
+        // frame-grid value against the engine's continuous clock, so a magnitude below one frame is
+        // the sub-frame phase of the sampling instant, not an error: two sessions whose `capErr`
+        // differs by less than `capFr = 1.0` made the SAME reading. Round 11 of #418 is exactly that
+        // mistake made on a host-side metric (two clocks sampled at different points, differenced,
+        // and a 0.050 s instrument constant reported as accuracy), so this line prints the quantum
+        // next to the value rather than leaving it to be rediscovered per reader.
         if let picture {
             picture.attachIfNeeded(engine.currentAVPlayerItem)
             if let sample = picture.sample() {
-                line += String(format: " pic=%.3f picItem=%.3f axisErr=%+.3f capErr=%+.3f",
+                let capErr = sample.pictureSourceTime - engine.sourceTime
+                line += String(format: " pic=%.3f picItem=%.3f axisErr=%+.3f capErr=%+.3f capFr=%+.2f",
                                sample.pictureSourceTime, sample.itemTime, sample.axisError,
-                               sample.pictureSourceTime - engine.sourceTime)
+                               capErr, capErr / picture.frameQuantum)
             } else {
                 line += " pic=none"
             }
@@ -610,6 +736,27 @@ private func playSmokeTest(url: URL, seconds: Double, live: Bool, nativeHLS: Boo
         if hostCalls.contains("seekback"), tick == 30 {
             print("  HOSTCALL seekToLiveEdge()")
             await engine.seekToLiveEdge()
+        }
+        // AE#479: a scrub that lands PAUSED. The SW pump parks in its pause wait and hears of the seek
+        // only at play(), so whatever the 1 Hz `[SWDiag]` line reports for the five paused ticks after
+        // the landing comes from state the seek path itself had to keep honest. `--seek-pattern`'s
+        // first entry picks the target, else 20 s ahead.
+        if hostCalls.contains("pauseseek") {
+            if tick == 12 {
+                print("  HOSTCALL pause()")
+                engine.pause()
+            }
+            if tick == 15 {
+                let target = seekPattern.first ?? min(engine.currentTime + 20, engine.duration * 0.9)
+                print(String(format: "  HOSTCALL seek(to: %.2f) while paused (stays paused until tick 20)", target))
+                await engine.seek(to: target)
+                print(String(format: "  SEEKLANDED target=%.2f (clock=%.2f, state=%@)",
+                             target, engine.currentTime, String(describing: engine.state)))
+            }
+            if tick == 20 {
+                print("  HOSTCALL play()")
+                engine.play()
+            }
         }
         // #292: three transport calls that can land inside a seek's reposition window. A is the
         // reported case (a scrub arriving as two same-target seeks, the second superseding the first);

@@ -405,14 +405,15 @@ final class StreamsRepository: ObservableObject {
                     attempt += 1
                 }
             }
+            let presentedStreams = await DebridStreamPresentation.present(streams: streams)
             return GroupUpdate(
                 addonId: target.addonId,
                 group: AddonStreamGroup(
                     addonId: target.addonId,
                     displayName: target.displayName,
-                    streams: streams,
+                    streams: presentedStreams,
                     isLoading: false,
-                    error: streams.isEmpty ? nil : nil
+                    error: nil
                 )
             )
         } catch {
@@ -515,6 +516,10 @@ final class StreamsRepository: ObservableObject {
 
     static func storeManifest(_ manifest: StreamAddonManifest, for url: URL) async {
         await manifestCache.storeSuccess(manifest, for: url)
+    }
+
+    static func clearManifestCache() async {
+        await manifestCache.removeAll()
     }
 
     // MARK: - External subtitles
@@ -781,6 +786,37 @@ struct StreamAddonSubtitleDTO: Decodable {
     let title: String?
     let name: String?
     let id: String?
+
+    enum CodingKeys: String, CodingKey {
+        case url, language, lang, title, name, id
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.url = try? container.decodeIfPresent(String.self, forKey: .url)
+        self.language = try? container.decodeIfPresent(String.self, forKey: .language)
+        self.lang = try? container.decodeIfPresent(String.self, forKey: .lang)
+        self.title = try? container.decodeIfPresent(String.self, forKey: .title)
+        self.name = try? container.decodeIfPresent(String.self, forKey: .name)
+        if let str = try? container.decodeIfPresent(String.self, forKey: .id) {
+            self.id = str
+        } else if let num = try? container.decodeIfPresent(Int.self, forKey: .id) {
+            self.id = String(num)
+        } else if let dbl = try? container.decodeIfPresent(Double.self, forKey: .id) {
+            self.id = String(Int(dbl))
+        } else {
+            self.id = nil
+        }
+    }
+
+    init(url: String?, language: String?, lang: String?, title: String?, name: String?, id: String?) {
+        self.url = url
+        self.language = language
+        self.lang = lang
+        self.title = title
+        self.name = name
+        self.id = id
+    }
 
     func toNuvioSubtitle(source: String? = nil) -> NuvioSubtitle? {
         guard let subtitleURL = cleaned(url) else { return nil }

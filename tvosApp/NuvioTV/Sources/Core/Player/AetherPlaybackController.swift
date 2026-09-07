@@ -1505,7 +1505,7 @@ struct AetherExternalSubtitleRegistration {
 
     static func make(
         subtitles: [NuvioSubtitle],
-        httpHeaders: [String: String]
+        httpHeaders: [String: String] = [:]
     ) -> AetherExternalSubtitleRegistration {
         var tracks: [ExternalSubtitleTrack] = []
         var urlsByTrackID: [Int: String] = [:]
@@ -1517,7 +1517,7 @@ struct AetherExternalSubtitleRegistration {
                     url: url,
                     name: subtitle.label ?? (language.isEmpty ? nil : language),
                     language: language.isEmpty ? nil : language,
-                    httpHeaders: httpHeaders.isEmpty ? nil : httpHeaders
+                    httpHeaders: [:]
                 )
             )
             urlsByTrackID[id] = subtitle.url
@@ -1938,6 +1938,25 @@ final class AetherPlaybackController: UIViewController, PlaybackEngineControllin
     }
 
     private func observeEngine() {
+        engine.$startupProgress
+            .receive(on: DispatchQueue.main)
+            .sink { progress in
+                guard let cp = progress?.checkpoint else { return }
+                switch cp {
+                case .sourceOpened:
+                    PlaybackStartupBenchmark.shared.markEngineCheckpoint("sourceOpened")
+                case .streamsProbed:
+                    PlaybackStartupBenchmark.shared.markEngineCheckpoint("streamsProbed")
+                case .displayPrepared:
+                    PlaybackStartupBenchmark.shared.markEngineCheckpoint("displayPrepared")
+                case .sessionConstructed:
+                    PlaybackStartupBenchmark.shared.markEngineCheckpoint("sessionConstructed")
+                default:
+                    break
+                }
+            }
+            .store(in: &cancellables)
+
         engine.$playbackPhase
             .receive(on: DispatchQueue.main)
             .sink { [weak self] phase in
@@ -1975,10 +1994,26 @@ final class AetherPlaybackController: UIViewController, PlaybackEngineControllin
             }
             .store(in: &cancellables)
 
+        engine.$activeAudioTrackIndex
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.mapAudioTracks(self.engine.audioTracks)
+            }
+            .store(in: &cancellables)
+
         engine.$subtitleTracks
             .receive(on: DispatchQueue.main)
             .sink { [weak self] tracks in
                 self?.mapSubtitleTracks(tracks)
+            }
+            .store(in: &cancellables)
+
+        engine.$activeSubtitleTrackIndex
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.mapSubtitleTracks(self.engine.subtitleTracks)
             }
             .store(in: &cancellables)
 
@@ -2204,7 +2239,7 @@ final class AetherPlaybackController: UIViewController, PlaybackEngineControllin
         sourceProbe = nil
         let externalRegistration = AetherExternalSubtitleRegistration.make(
             subtitles: request.externalSubtitles,
-            httpHeaders: request.httpHeaders
+            httpHeaders: [:]
         )
         #if os(tvOS) || os(iOS)
         var nowPlaying: [String: Any] = [:]
@@ -2389,6 +2424,7 @@ final class AetherPlaybackController: UIViewController, PlaybackEngineControllin
 
     func selectAudio(_ trackId: Int) {
         engine.selectAudioTrack(index: trackId)
+        mapAudioTracks(engine.audioTracks)
     }
 
     func selectSubtitle(_ trackId: Int) {
@@ -2397,6 +2433,7 @@ final class AetherPlaybackController: UIViewController, PlaybackEngineControllin
         } else {
             engine.selectSubtitleTrack(index: trackId)
         }
+        mapSubtitleTracks(engine.subtitleTracks)
     }
 
     func addSubtitle(_ subtitle: NuvioSubtitle, select: Bool) {
@@ -2406,16 +2443,14 @@ final class AetherPlaybackController: UIViewController, PlaybackEngineControllin
             url: url,
             name: subtitle.label ?? (lang.isEmpty ? nil : lang),
             language: lang.isEmpty ? nil : lang,
-            httpHeaders: currentHTTPHeaders.isEmpty ? nil : currentHTTPHeaders
+            httpHeaders: [:]
         )
         let info = engine.addExternalSubtitleTrack(track)
         externalSubtitleURLsByTrackID[info.id] = subtitle.url
-        // @Published fires while registration is in progress, before the URL
-        // association above exists. Remap once identity metadata is complete.
-        mapSubtitleTracks(engine.subtitleTracks)
         if select {
             engine.selectSubtitleTrack(index: info.id)
         }
+        mapSubtitleTracks(engine.subtitleTracks)
     }
 
     func addAudioUrl(_ url: String) {

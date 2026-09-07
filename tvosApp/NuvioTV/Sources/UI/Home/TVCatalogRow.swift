@@ -24,9 +24,8 @@ enum TVHomeLayout {
 
     /// Horizontal strip motion with no spring settling.
     static let scrollAnimation = Animation.easeOut(duration: 0.22)
-    /// Keep successive remote presses from stacking long-running vertical
-    /// transactions while retaining a visible native scroll transition.
-    static let verticalScrollAnimation = Animation.easeOut(duration: 0.22)
+    /// Snappy vertical row transition matching Apple TV remote cadence without queuing.
+    static let verticalScrollAnimation = Animation.easeOut(duration: 0.14)
 }
 
 enum TVLayout {
@@ -47,11 +46,11 @@ enum CollectionFolderGridMetrics {
 struct TVLoadingCatalogRow: View {
     let title: String
     var addonName: String? = nil
+    var showAddonName: Bool = true
 
     @AppStorage(SettingsKey.homeLayout) private var homeLayout = "Modern"
     @AppStorage(SettingsKey.posterLabels) private var posterLabels = false
     @AppStorage(SettingsKey.liquidGlassCards) private var liquidGlassCards = true
-    @AppStorage(SettingsKey.catalogAddonNames) private var catalogAddonNames = true
     @AppStorage(SettingsKey.theme) private var theme = SettingsAccent.white.rawValue
 
     private var cardWidth: CGFloat { homeLayout == "Compact" ? 170 : 210 }
@@ -71,7 +70,7 @@ struct TVLoadingCatalogRow: View {
                     .font(.custom("Inter-Bold", size: 30))
                     .foregroundColor(.white)
 
-                if catalogAddonNames, let addonName = addonName, !addonName.isEmpty {
+                if showAddonName, let addonName = addonName, !addonName.isEmpty {
                     Text(addonName)
                         .font(.custom("Inter-SemiBold", size: 16))
                         .foregroundColor(SettingsAccent.color(for: theme))
@@ -111,6 +110,7 @@ struct TVCatalogRow: View {
     let id: String
     let title: String
     var addonName: String? = nil
+    var showAddonName: Bool = true
     let horizontalEdgeInset: CGFloat
     let items: [NuvioMeta]
     var progressByItemId: [String: ContinueWatchingItem] = [:]
@@ -138,7 +138,6 @@ struct TVCatalogRow: View {
     @State private var scrollIndex: Int?
     @AppStorage(SettingsKey.homeLayout) private var homeLayout = "Modern"
     @AppStorage(SettingsKey.posterLabels) private var posterLabels = false
-    @AppStorage(SettingsKey.catalogAddonNames) private var catalogAddonNames = true
     @AppStorage(SettingsKey.theme) private var theme = SettingsAccent.white.rawValue
     @AppStorage(SettingsKey.smoothFocus) private var smoothFocus = true
     @AppStorage(SettingsKey.focusHighlighter) private var focusHighlighter = false
@@ -195,6 +194,12 @@ struct TVCatalogRow: View {
     }
 
     private var defaultFocusCardKey: String? {
+        if let initialFocusCardKey {
+            if initialFocusCardKey.hasPrefix("\(id)\u{1}") {
+                return initialFocusCardKey
+            }
+            return nil
+        }
         guard !items.isEmpty else { return nil }
         let idx = effectiveScrollIndex
         return "\(id)\u{1}\(items[idx].id)"
@@ -207,7 +212,7 @@ struct TVCatalogRow: View {
                     .font(.custom("Inter-Bold", size: 30))
                     .foregroundColor(.white)
 
-                if catalogAddonNames, let addonName = addonName, !addonName.isEmpty {
+                if showAddonName, let addonName = addonName, !addonName.isEmpty {
                     Text(addonName)
                         .font(.custom("Inter-SemiBold", size: 16))
                         .foregroundColor(SettingsAccent.color(for: theme))
@@ -280,10 +285,17 @@ struct TVCatalogRow: View {
                                 onScrollIndexChange(itemIndex)
                             }
                             if rowSmoothFocus && !suppressFocusAnimations {
+                                TVHomeDebugTrace.log(
+                                    "row.scroll.animated row=\(id) from=\(effectiveScrollIndex) to=\(itemIndex)"
+                                )
                                 withAnimation(TVHomeLayout.scrollAnimation) {
                                     updateScrollPosition()
                                 }
                             } else {
+                                TVHomeDebugTrace.log(
+                                    "row.scroll.SUPPRESSED (no animation) row=\(id) from=\(effectiveScrollIndex) to=\(itemIndex) "
+                                        + "smoothFocus=\(rowSmoothFocus) suppressFocusAnimations=\(suppressFocusAnimations)"
+                                )
                                 var transaction = Transaction()
                                 transaction.animation = nil
                                 withTransaction(transaction) {
@@ -344,8 +356,7 @@ struct TVCatalogRow: View {
                         onSelect(item)
                     }
                     .disabled(
-                        (restrictFocusToCardKey != nil && restrictFocusToCardKey != cardKey)
-                            || (!isRowFocused && itemIndex != effectiveScrollIndex)
+                        restrictFocusToCardKey != nil && restrictFocusToCardKey != cardKey
                     )
                 }
             }
@@ -404,6 +415,7 @@ extension TVCatalogRow: Equatable {
         return lhs.id == rhs.id
             && lhs.title == rhs.title
             && lhs.addonName == rhs.addonName
+            && lhs.showAddonName == rhs.showAddonName
             && lhs.horizontalEdgeInset == rhs.horizontalEdgeInset
             && lhs.items == rhs.items
             && lhs.watchedTitleKeys == rhs.watchedTitleKeys
@@ -413,7 +425,6 @@ extension TVCatalogRow: Equatable {
             && restrictEqual
             && retainEqual
             && lhs.suppressFocusAnimations == rhs.suppressFocusAnimations
-            && lhs.isRowFocused == rhs.isRowFocused
     }
 }
 
@@ -454,6 +465,7 @@ struct TVHomeCatalogGridSection: View {
     var externalFocus: FocusState<String?>.Binding? = nil
     var restrictFocusToCardKey: String? = nil
     var suppressFocusAnimations = false
+    var showAddonName: Bool = true
     let onInitialFocusRequested: () -> Void
     let onFocus: (NuvioMeta) -> Void
     let onSelect: (NuvioMeta) -> Void
@@ -461,7 +473,6 @@ struct TVHomeCatalogGridSection: View {
     let onSeeAllFocus: () -> Void
     let onSeeAll: () -> Void
 
-    @AppStorage(SettingsKey.catalogAddonNames) private var catalogAddonNames = true
     @AppStorage(SettingsKey.theme) private var theme = SettingsAccent.white.rawValue
 
     private var previewItems: [NuvioMeta] {
@@ -479,7 +490,7 @@ struct TVHomeCatalogGridSection: View {
                     .font(.custom("Inter-Bold", size: 30))
                     .foregroundColor(.white)
 
-                if catalogAddonNames, let addonName = section.addonName, !addonName.isEmpty {
+                if showAddonName, let addonName = section.addonName, !addonName.isEmpty {
                     Text(addonName)
                         .font(.custom("Inter-SemiBold", size: 16))
                         .foregroundColor(SettingsAccent.color(for: theme))
@@ -873,6 +884,12 @@ struct TVCollectionFolderRow: View {
     }
 
     private var defaultFocusFolderKey: String? {
+        if let initialFocusCardKey {
+            if initialFocusCardKey.hasPrefix("\(id)\u{1}") {
+                return initialFocusCardKey
+            }
+            return nil
+        }
         guard !folders.isEmpty else { return nil }
         let idx = effectiveScrollIndex
         return "\(id)\u{1}\(folders[idx].id)"
@@ -941,8 +958,7 @@ struct TVCollectionFolderRow: View {
                         onSelect: { onSelect(folder) }
                     )
                     .disabled(
-                        (restrictFocusToCardKey != nil && restrictFocusToCardKey != cardKey)
-                            || (!isRowFocused && index != effectiveScrollIndex)
+                        restrictFocusToCardKey != nil && restrictFocusToCardKey != cardKey
                     )
                 }
             }
@@ -993,7 +1009,6 @@ extension TVCollectionFolderRow: Equatable {
             && restrictEqual
             && retainEqual
             && lhs.suppressFocusAnimations == rhs.suppressFocusAnimations
-            && lhs.isRowFocused == rhs.isRowFocused
     }
 }
 
@@ -1026,7 +1041,12 @@ struct TVCollectionFolderCard: View {
         TVCollectionFolderCardLayout.cardHeight(layoutMode: layoutMode)
     }
 
-    private var layoutWidth: CGFloat { cardWidth }
+    /// Focusable surface stays aligned to standard portrait column width so
+    /// navigating vertically onto a portrait row targets the directly aligned card
+    /// instead of shifting rightwards to column 1.
+    private var layoutWidth: CGFloat {
+        folder.tileShape == .landscape ? (layoutMode == "Compact" ? 170 : 210) : cardWidth
+    }
 
     private var totalCardHeight: CGFloat {
         cardHeight + (showPosterLabels && !folder.hideTitle ? 48 : 0)
@@ -1112,6 +1132,7 @@ struct TVCollectionFolderCard: View {
                 isFocused = true
             }
         }
+        .frame(width: layoutWidth, height: totalCardHeight, alignment: .topLeading)
         .frame(width: cardWidth, height: totalCardHeight, alignment: .topLeading)
         .zIndex(showFocus ? 1 : 0)
     }

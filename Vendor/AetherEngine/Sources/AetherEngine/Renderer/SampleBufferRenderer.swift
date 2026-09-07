@@ -162,9 +162,12 @@ final class SampleBufferRenderer: @unchecked Sendable {
         if let settled { observer?(settled) }
     }
 
+    /// #489: the gravity is a construction parameter, not something a caller assigns afterwards.
+    /// The engine holds the host app's picture mode across loads, and a layer that starts on the
+    /// default and is corrected a moment later shows one frame of the wrong fill.
     @MainActor
-    init() {
-        let layer = Self.makeDisplayLayer(isHDR: false)
+    init(videoGravity: AVLayerVideoGravity = .resizeAspect) {
+        let layer = Self.makeDisplayLayer(isHDR: false, gravity: videoGravity)
         displayLayer = layer
         if #available(tvOS 18.0, iOS 18.0, macOS 15.0, *) {
             renderingTarget = layer.sampleBufferRenderer

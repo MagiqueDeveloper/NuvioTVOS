@@ -127,9 +127,11 @@ struct CollectionFolderBrowseView: View {
         }
         .onExitCommand(perform: onBack)
         .onAppear {
+            TVHomeDebugTrace.log("collectionFolder.appear id=\(folder.id) title=\(collectionTitle)")
             requestLoadingFocusIfNeeded()
         }
         .onDisappear {
+            TVHomeDebugTrace.log("collectionFolder.disappear id=\(folder.id)")
             collectionEnrichmentTask?.cancel()
             collectionEnrichmentTask = nil
         }
@@ -137,7 +139,7 @@ struct CollectionFolderBrowseView: View {
             refreshWatchedTitles()
             await load()
         }
-        .onReceive(NotificationCenter.default.publisher(for: WatchedStore.changedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: WatchedStore.changedNotification).receive(on: RunLoop.main)) { _ in
             refreshWatchedTitles()
         }
         .onChange(of: focusedItemID) { _, newValue in

@@ -200,6 +200,116 @@ final class StreamQualityTagsTests: XCTestCase {
         XCTAssertNil(builtIn)
     }
 
+    func testExternalPlayerFilenameAndPositionParameters() {
+        let stream = URL(string: "https://torrentio.strem.fun/stream/btQt7hBjitPmN5KQjRjZxT49F4ISsyPyyjqDx27KjX0os01JifcLDA")!
+        let movieFilename = "Superman & Lois (2024).mp4"
+        let infuse = ExternalPlayer.infuse.launchURL(
+            for: stream,
+            filename: movieFilename,
+            position: 125.0
+        )
+        XCTAssertNotNil(infuse)
+        XCTAssertTrue(infuse!.absoluteString.contains("filename=Superman%20%26%20Lois%20%282024%29.mp4"))
+        XCTAssertTrue(infuse!.absoluteString.contains("position=125"))
+
+        let outplayer = ExternalPlayer.outplayer.launchURL(
+            for: stream,
+            filename: movieFilename
+        )
+        XCTAssertNotNil(outplayer)
+        XCTAssertTrue(outplayer!.absoluteString.contains("outplayer://x-callback-url/play?url="))
+        XCTAssertTrue(outplayer!.absoluteString.contains("filename=Superman%20%26%20Lois%20%282024%29.mp4"))
+
+        let vidhub = ExternalPlayer.vidhub.launchURL(
+            for: stream,
+            filename: movieFilename,
+            position: 45.0
+        )
+        XCTAssertNotNil(vidhub)
+        XCTAssertTrue(vidhub!.absoluteString.contains("vidhub://play?url="))
+        XCTAssertTrue(vidhub!.absoluteString.contains("filename=Superman%20%26%20Lois%20%282024%29.mp4"))
+        XCTAssertTrue(vidhub!.absoluteString.contains("position=45"))
+    }
+
+    func testExternalPlayerMediaFilenameGeneration() {
+        let movieMeta = NuvioMeta(
+            id: "tt12345",
+            name: "Superman: Legacy",
+            description: nil,
+            posterUrl: nil,
+            backgroundUrl: nil,
+            logoUrl: nil,
+            imdbId: "tt12345",
+            tmdbId: 100,
+            type: "movie",
+            year: 2025,
+            genres: nil,
+            rating: nil,
+            releaseInfo: "2025",
+            runtime: nil,
+            cast: nil,
+            director: nil,
+            writer: nil,
+            certification: nil,
+            country: nil,
+            released: nil,
+            status: nil,
+            videos: nil,
+            trailerYtIds: nil,
+            externalRatings: nil
+        )
+        let movieFilename = ExternalPlayer.mediaFilename(meta: movieMeta)
+        XCTAssertEqual(movieFilename, "Superman - Legacy (2025).mp4")
+
+        let seriesMeta = NuvioMeta(
+            id: "tt67890",
+            name: "Superman & Lois",
+            description: nil,
+            posterUrl: nil,
+            backgroundUrl: nil,
+            logoUrl: nil,
+            imdbId: "tt67890",
+            tmdbId: 200,
+            type: "series",
+            year: 2021,
+            genres: nil,
+            rating: nil,
+            releaseInfo: "2021-2024",
+            runtime: nil,
+            cast: nil,
+            director: nil,
+            writer: nil,
+            certification: nil,
+            country: nil,
+            released: nil,
+            status: nil,
+            videos: nil,
+            trailerYtIds: nil,
+            externalRatings: nil
+        )
+        let episodeFilename = ExternalPlayer.mediaFilename(
+            meta: seriesMeta,
+            season: 4,
+            episode: 1,
+            episodeTitle: "The End & The Beginning"
+        )
+        XCTAssertEqual(episodeFilename, "Superman & Lois - S04E01 - The End & The Beginning.mp4")
+
+        let episodeWithoutTitle = ExternalPlayer.mediaFilename(
+            meta: seriesMeta,
+            season: 4,
+            episode: 2,
+            episodeTitle: nil
+        )
+        XCTAssertEqual(episodeWithoutTitle, "Superman & Lois - S04E02.mp4")
+
+        let fallback = ExternalPlayer.mediaFilename(
+            meta: nil,
+            streamFilename: "Superman.2025.1080p.mkv"
+        )
+        XCTAssertEqual(fallback, "Superman.2025.1080p.mkv")
+    }
+
     func testInfuseXCallbacksArePercentEncoded() {
         let stream = URL(string: "https://cdn.example/movie.mkv?token=a&b=c")!
         let success = URL(string: "nuvio-tv://external-playback/ABC-123")!

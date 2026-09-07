@@ -128,7 +128,13 @@ final class CatalogDecodingTests: XCTestCase {
         XCTAssertTrue(PosterArtworkCachePolicy.isVolatile(URL(string: "https://xperience-app.com/a.jpg")!))
         XCTAssertTrue(PosterArtworkCachePolicy.isVolatile(URL(string: "https://cdn.xperience-app.com/a.jpg")!))
         XCTAssertTrue(PosterArtworkCachePolicy.isVolatile(URL(string: "https://btttr.cc/a.jpg")!))
+        XCTAssertTrue(PosterArtworkCachePolicy.isVolatile(URL(string: "https://ratingposterdb.com/poster.jpg")!))
+        XCTAssertTrue(PosterArtworkCachePolicy.isVolatile(URL(string: "https://api.ratingposterdb.com/poster.jpg")!))
+        XCTAssertTrue(PosterArtworkCachePolicy.isVolatile(URL(string: "https://top-posters.com/poster.jpg")!))
+        XCTAssertTrue(PosterArtworkCachePolicy.isVolatile(URL(string: "https://postersplus.elfhosted.com/poster.jpg")!))
         XCTAssertFalse(PosterArtworkCachePolicy.isVolatile(URL(string: "https://xperience-app.com.evil.test/a.jpg")!))
+        XCTAssertFalse(PosterArtworkCachePolicy.isVolatile(URL(string: "https://image.tmdb.org/t/p/w500/poster.jpg")!))
+        XCTAssertFalse(PosterArtworkCachePolicy.isVolatile(URL(string: "https://artworks.thetvdb.com/banners/poster.jpg")!))
         XCTAssertFalse(PosterArtworkCachePolicy.isVolatile(URL(string: "https://example.com/a.jpg")!))
     }
 
@@ -598,4 +604,87 @@ final class CatalogDecodingTests: XCTestCase {
         XCTAssertFalse(WatchedStore.contains(meta: meta))
         XCTAssertEqual(WatchedStore.items().count, 0)
     }
+
+    func testAddonManifestCatalogSearchAndDiscoverCapabilities() throws {
+        // Cinemeta / BetterPosters style catalog with search and genre extras
+        let searchAndDiscoverJSON = """
+        {
+            "type": "movie",
+            "id": "top",
+            "name": "Popular",
+            "extra": [
+                {"name": "search", "isRequired": false},
+                {"name": "genre", "isRequired": false, "options": ["Action", "Comedy"]},
+                {"name": "skip", "isRequired": false}
+            ]
+        }
+        """
+        let catalog1 = try JSONDecoder().decode(AddonManifestCatalog.self, from: Data(searchAndDiscoverJSON.utf8))
+        XCTAssertTrue(catalog1.supportsSearch)
+        XCTAssertTrue(catalog1.supportsDiscover)
+        XCTAssertTrue(catalog1.eligibleForHome)
+
+        // Search-only catalog (e.g. requires search)
+        let searchOnlyJSON = """
+        {
+            "type": "movie",
+            "id": "search_catalog",
+            "name": "Search",
+            "extra": [
+                {"name": "search", "isRequired": true}
+            ]
+        }
+        """
+        let catalog2 = try JSONDecoder().decode(AddonManifestCatalog.self, from: Data(searchOnlyJSON.utf8))
+        XCTAssertTrue(catalog2.supportsSearch)
+        XCTAssertFalse(catalog2.supportsDiscover)
+        XCTAssertFalse(catalog2.eligibleForHome)
+
+        // Catalog with unfulfillable required extra (e.g. requires actor)
+        let actorRequiredJSON = """
+        {
+            "type": "movie",
+            "id": "by_actor",
+            "name": "By Actor",
+            "extra": [
+                {"name": "search", "isRequired": false},
+                {"name": "actor", "isRequired": true}
+            ]
+        }
+        """
+        let catalog3 = try JSONDecoder().decode(AddonManifestCatalog.self, from: Data(actorRequiredJSON.utf8))
+        XCTAssertFalse(catalog3.supportsSearch)
+        XCTAssertFalse(catalog3.supportsDiscover)
+        XCTAssertFalse(catalog3.eligibleForHome)
+    }
+
+    @MainActor
+    func testDiscoverCatalogOptionsAndViewModelStateTransitions() async throws {
+        let repo = MockCatalogRepository()
+        let sources = await repo.getDiscoverSources()
+        XCTAssertEqual(sources.count, 2)
+        XCTAssertEqual(sources[0].type, "movie")
+        XCTAssertEqual(sources[0].catalogName, "Popular Movies")
+        XCTAssertEqual(sources[1].type, "series")
+        XCTAssertEqual(sources[1].catalogName, "Popular Series")
+
+        let viewModel = DiscoverViewModel(repository: repo)
+        // Allow initial sources task to resolve
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(viewModel.typeOptions, ["movie", "series"])
+        XCTAssertEqual(viewModel.selectedType, "movie")
+        XCTAssertEqual(viewModel.selectedCatalog?.catalogName, "Popular Movies")
+        XCTAssertFalse(viewModel.genreOptions.isEmpty)
+
+        // Switch to series
+        viewModel.setType("series")
+        XCTAssertEqual(viewModel.selectedType, "series")
+        XCTAssertEqual(viewModel.selectedCatalog?.catalogName, "Popular Series")
+
+        // Switch genre
+        viewModel.setGenre("Action")
+        XCTAssertEqual(viewModel.selectedGenre, "Action")
+    }
 }
+

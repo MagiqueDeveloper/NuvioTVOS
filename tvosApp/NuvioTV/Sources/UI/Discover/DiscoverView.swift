@@ -142,40 +142,46 @@ struct DiscoverSection: View {
     private var filterBar: some View {
         HStack(spacing: 16) {
             FilterMenu(
-                label: viewModel.type.title,
+                label: viewModel.currentTypeTitle,
                 onFocusChange: { updateDiscoverFocus("filter:type", isFocused: $0) }
             ) {
-                ForEach(DiscoverType.allCases) { type in
+                ForEach(viewModel.typeOptions, id: \.self) { type in
                     Button { viewModel.setType(type) } label: {
-                        menuItem(type.title, selected: viewModel.type == type)
+                        menuItem(viewModel.typeTitle(for: type), selected: viewModel.selectedType == type)
                     }
                 }
             }
 
-            FilterMenu(
-                label: viewModel.sort.title,
-                onFocusChange: { updateDiscoverFocus("filter:sort", isFocused: $0) }
-            ) {
-                ForEach(DiscoverSort.allCases) { sort in
-                    Button { viewModel.setSort(sort) } label: {
-                        menuItem(sort.title, selected: viewModel.sort == sort)
+            if !viewModel.catalogOptions.isEmpty {
+                FilterMenu(
+                    label: viewModel.selectedCatalog?.catalogName ?? L10n.string("tvos_discover_popular", fallback: "Popular"),
+                    onFocusChange: { updateDiscoverFocus("filter:sort", isFocused: $0) }
+                ) {
+                    ForEach(viewModel.catalogOptions) { catalog in
+                        Button { viewModel.setCatalog(catalog) } label: {
+                            menuItem(catalog.catalogName, selected: viewModel.selectedCatalog?.key == catalog.key)
+                        }
                     }
                 }
             }
 
-            FilterMenu(
-                label: viewModel.genre ?? L10n.string("tvos_discover_all_genres", fallback: "All Genres"),
-                onFocusChange: { updateDiscoverFocus("filter:genre", isFocused: $0) }
-            ) {
-                Button { viewModel.setGenre(nil) } label: {
-                    menuItem(
-                        L10n.string("tvos_discover_all_genres", fallback: "All Genres"),
-                        selected: viewModel.genre == nil
-                    )
-                }
-                ForEach(viewModel.genres, id: \.self) { genre in
-                    Button { viewModel.setGenre(genre) } label: {
-                        menuItem(genre, selected: viewModel.genre == genre)
+            if !viewModel.genreOptions.isEmpty {
+                FilterMenu(
+                    label: viewModel.selectedGenre ?? L10n.string("tvos_discover_all_genres", fallback: "All Genres"),
+                    onFocusChange: { updateDiscoverFocus("filter:genre", isFocused: $0) }
+                ) {
+                    if !viewModel.isGenreRequired {
+                        Button { viewModel.setGenre(nil) } label: {
+                            menuItem(
+                                L10n.string("tvos_discover_all_genres", fallback: "All Genres"),
+                                selected: viewModel.selectedGenre == nil
+                            )
+                        }
+                    }
+                    ForEach(viewModel.genreOptions, id: \.self) { genre in
+                        Button { viewModel.setGenre(genre) } label: {
+                            menuItem(genre, selected: viewModel.selectedGenre == genre)
+                        }
                     }
                 }
             }
@@ -378,40 +384,17 @@ private struct DiscoverCard: View {
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
-                ZStack(alignment: .bottom) {
-                    CachedPosterArtwork(
-                        urlString: meta.posterUrl,
-                        width: DiscoverGridMetrics.posterWidth,
-                        height: DiscoverGridMetrics.posterHeight,
-                        maximumWidth: DiscoverGridMetrics.posterWidth
-                    ) {
-                        ZStack {
-                            Rectangle().fill(Color.white.opacity(0.07))
-                            Image(systemName: meta.type == "series" ? "tv" : "film")
-                                .font(.system(size: 40))
-                                .foregroundColor(.white.opacity(0.25))
-                        }
-                    }
-                    .frame(width: DiscoverGridMetrics.posterWidth, height: DiscoverGridMetrics.posterHeight)
-
-                    if metaLine != nil {
-                        LinearGradient(
-                            colors: [.clear, .black.opacity(0.85)],
-                            startPoint: .center,
-                            endPoint: .bottom
-                        )
-                        .frame(height: 120)
-                        .frame(maxWidth: .infinity, alignment: .bottom)
-
-                        if let metaLine {
-                            Text(metaLine)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.95))
-                                .lineLimit(1)
-                                .padding(.horizontal, 12)
-                                .padding(.bottom, 10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                CachedPosterArtwork(
+                    urlString: meta.posterUrl,
+                    width: DiscoverGridMetrics.posterWidth,
+                    height: DiscoverGridMetrics.posterHeight,
+                    maximumWidth: DiscoverGridMetrics.posterWidth
+                ) {
+                    ZStack {
+                        Rectangle().fill(Color.white.opacity(0.07))
+                        Image(systemName: meta.type == "series" ? "tv" : "film")
+                            .font(.system(size: 40))
+                            .foregroundColor(.white.opacity(0.25))
                     }
                 }
                 .frame(width: DiscoverGridMetrics.posterWidth, height: DiscoverGridMetrics.posterHeight)
@@ -458,14 +441,6 @@ private struct DiscoverCard: View {
         )
         .onChange(of: focused) { _, isFocused in onFocusChange?(isFocused) }
         .animation(smoothFocus ? .spring(response: 0.28, dampingFraction: 0.75) : nil, value: showsFocusedAppearance)
-    }
-
-    /// "Genre · ★ Rating" overlay, omitting whichever piece is missing.
-    private var metaLine: String? {
-        var parts: [String] = []
-        if let genre = meta.genres?.first, !genre.isEmpty { parts.append(genre) }
-        if let rating = meta.rating, rating > 0 { parts.append(String(format: "★ %.1f", rating)) }
-        return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
     }
 
     private var focusBorderColor: Color {

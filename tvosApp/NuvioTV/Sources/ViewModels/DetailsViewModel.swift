@@ -241,7 +241,7 @@ class DetailsViewModel: ObservableObject {
         // If TMDB returns quickly, populate More Like This immediately:
         let tmdbRelated = await tmdbTask
         if !tmdbRelated.isEmpty {
-            await self.applyInitialMoreLikeThisIfEmpty(tmdbRelated, preferredSource: preferredSource, for: meta.id)
+            self.applyInitialMoreLikeThisIfEmpty(tmdbRelated, preferredSource: preferredSource, for: meta.id)
         }
 
         let traktRelated = await traktTask
@@ -257,14 +257,14 @@ class DetailsViewModel: ObservableObject {
 
         guard !resolved.isEmpty else { return }
 
-        await self.applyMoreLikeThis(resolved, for: meta.id)
+        self.applyMoreLikeThis(resolved, for: meta.id)
 
         // Trakt's related endpoint commonly omits usable artwork even with
         // `extended=images`. Resolve those IMDb ids through Cinemeta so the
         // row gets the same poster data as Home. Keep the initial titles on
         // screen while these independent artwork requests finish.
         let hydrated = await hydrateRelatedArtwork(in: resolved)
-        await self.applyMoreLikeThis(hydrated, for: meta.id)
+        self.applyMoreLikeThis(hydrated, for: meta.id)
     }
 
     private func hydrateRelatedArtwork(in items: [RelatedTitle]) async -> [RelatedTitle] {

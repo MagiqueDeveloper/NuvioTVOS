@@ -52,6 +52,56 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
     /// deadlocks this one. See `makeSessionConfig`.
     static let longLivedConnectionsPerHost = 64
 
+    struct HopTiming {
+        let host: String
+        let port: Int
+        let status: Int?
+        let ttfbMs: Double
+        let totalMs: Double
+    }
+
+    /// #377 follow-up: 32 MB at 100 Mbps takes about 3 seconds after a healthy first byte, while
+    /// measured stalls waited 5.3 and 9.5 seconds before one; trigger on summed redirect-hop TTFB.
+    static func slowFirstByteLine(taskSeconds: TimeInterval, hops: [HopTiming]) -> String? {
+        let firstByteMs = hops.reduce(0) { $0 + $1.ttfbMs }
+        guard firstByteMs > 1_000 else { return nil }
+        let taskMs = Int((taskSeconds * 1_000).rounded())
+        let summary = hops.map { hop in
+            var fields = ["\(hop.host):\(hop.port)"]
+            if let status = hop.status { fields.append("status=\(status)") }
+            fields.append("ttfb=\(Int(hop.ttfbMs.rounded()))ms")
+            fields.append("total=\(Int(hop.totalMs.rounded()))ms")
+            return fields.joined(separator: " ")
+        }.joined(separator: " -> ")
+        return "[AVIOReader] slow first byte: task=\(taskMs)ms over \(hops.count) hops: \(summary)"
+    }
+
+    /// Signed redirect paths and queries carry tokens, so only host and port cross this adapter.
+    static func hopTiming(_ transaction: URLSessionTaskTransactionMetrics) -> HopTiming? {
+        guard let url = transaction.request.url,
+              let host = url.host,
+              let fetchStart = transaction.fetchStartDate,
+              let responseStart = transaction.responseStartDate,
+              let responseEnd = transaction.responseEndDate else { return nil }
+        let port: Int
+        if let explicitPort = url.port {
+            port = explicitPort
+        } else if url.scheme?.lowercased() == "https" {
+            port = 443
+        } else if url.scheme?.lowercased() == "http" {
+            port = 80
+        } else {
+            return nil
+        }
+        return HopTiming(
+            host: host,
+            port: port,
+            status: (transaction.response as? HTTPURLResponse)?.statusCode,
+            ttfbMs: responseStart.timeIntervalSince(fetchStart) * 1_000,
+            totalMs: responseEnd.timeIntervalSince(fetchStart) * 1_000
+        )
+    }
+
     /// Session config factory. Short-lived probes/chunks get a 60s resource timeout;
     /// long-lived persistent/streaming connections omit it (fires mid-stream, NSURLError
     /// -1001; stall detection is handled by `connStallTimeout`). `urlCache = nil` avoids
@@ -345,9 +395,10 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
     /// refusal on an edge target. Keying off `requestURL()` there names the source in the books for
     /// an answer it never gave. The chain folding (#388) lands both keys in one bucket either way,
     /// so this is about which host the books name, not about which budget moves.
-    private func noteOriginRefusal(status: Int, respondedBy: URL? = nil) {
+    private func noteOriginRefusal(status: Int, retryAfter: TimeInterval? = nil,
+                                   respondedBy: URL? = nil) {
         let refusing = respondedBy ?? requestURL()
-        OriginRequestBudget.shared.noteRefusal(for: refusing, status: status)
+        OriginRequestBudget.shared.noteRefusal(for: refusing, status: status, retryAfter: retryAfter)
         // The refusal usually comes back from the post-redirect CDN, while the engine's revive arm
         // only knows the URL the host loaded. Where those differ (a proxy that 302s to a signed CDN
         // target, the shape in the #377 report) the verdict would never be found on the key the
@@ -444,6 +495,11 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
     /// on it rather than handing FFmpeg an empty stream to misreport as invalid data. Written on
     /// the delegate queue before `streamEnded`; guarded by `streamLock`.
     private var streamRefusedStatus = 0
+    /// AE#495: the `NSURLErrorDomain` code of a TLS trust refusal seen on any of this reader's tasks,
+    /// 0 when none. Recorded rather than thrown from where it happens, because the task that sees it
+    /// is not the one the open is waiting on: without it the open fails as FFmpeg's invalid data and a
+    /// self-signed origin is indistinguishable from a corrupt file. Guarded by `streamLock`.
+    private var transportSecurityCode = 0
 
     // MARK: - Persistent Mode (single forward-streaming connection, playback path)
 
@@ -1077,6 +1133,21 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
     /// publishes the status. `fallbackStatus` is the ranged open's refusal (0 when there was
     /// none): a hung-up unranged GET whose header never arrived within the open budget still
     /// carries the verdict the origin already gave. Demux thread, open-time only.
+    /// AE#495: record a TLS trust refusal off any task of this reader, and name it once in the log.
+    /// Everything else is left to the caller's own error handling; this only classifies.
+    func noteTransportSecurityFailure(_ error: Error?) {
+        guard let code = TransportSecurityFailure.code(in: error) else { return }
+        streamLock.lock()
+        let first = transportSecurityCode == 0
+        transportSecurityCode = code
+        streamLock.unlock()
+        guard first else { return }
+        EngineLog.emit(
+            "[AVIOReader] \(label) TLS refused (NSURLError \(code)): "
+            + "\(TransportSecurityFailure.sentence(for: code))",
+            category: .demux)
+    }
+
     private func failIfStreamingRefused(fallbackStatus: Int) throws {
         streamLock.lock()
         let refused = streamRefusedStatus
@@ -1084,6 +1155,21 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
         let empty = streamBuffer.isEmpty && streamBytesRead == 0
         streamLock.unlock()
         let status = refused != 0 ? refused : ((ended && empty) ? fallbackStatus : 0)
+        // AE#495: a handshake the system refused outranks a status, because there was never a
+        // response to carry one. Same reason this function exists at all: the demuxer would be handed
+        // nothing and report invalid data.
+        streamLock.lock()
+        let tlsCode = transportSecurityCode
+        streamLock.unlock()
+        if tlsCode != 0 {
+            EngineLog.emit(
+                "[AVIOReader] \(label) source unreachable: \(TransportSecurityFailure.sentence(for: tlsCode)); "
+                + "failing the open typed",
+                category: .demux)
+            markClosed()
+            close()
+            throw AVIOReaderError.transportSecurityFailed(code: tlsCode)
+        }
         guard status != 0 else { return }
         EngineLog.emit(
             "[AVIOReader] \(label) source refused: HTTP \(status); failing the open typed",
@@ -2212,12 +2298,15 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
     /// Single Range fetch for a detour block over the pooled chunkSession. Surfaces rate limiting with
     /// its Retry-After so the caller can back off in place rather than churn the connection (#71).
     private func detourFetchBlock(from offset: Int64, size: Int) -> DetourFetch {
+        let budget = Self.effectiveDetourBudget(chunkRequestTimeout: chunkRequestTimeout)
+        let ticket = OriginRequestBudget.shared.acquire(
+            for: requestURL(), label: "\(label) detour", timeout: budget)
+        defer { OriginRequestBudget.shared.release(ticket) }
         let rangeEnd = offset + Int64(size) - 1
         var request = URLRequest(url: requestURL())
         request.setValue("bytes=\(offset)-\(rangeEnd)", forHTTPHeaderField: "Range")
         // #93/#96: a starved backward-scrub detour fetch must abort fast (the rescue reconnect serves
         // instantly), so this path uses the tight interactive budget, not the full chunk timeout.
-        let budget = Self.effectiveDetourBudget(chunkRequestTimeout: chunkRequestTimeout)
         request.timeoutInterval = budget
         applyExtraHeaders(&request)
         do {
@@ -2225,8 +2314,10 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
             if let http = response as? HTTPURLResponse {
                 let status = http.statusCode
                 if Self.isRateLimitStatus(status) {
-                    noteOriginRefusal(status: status, respondedBy: http.url)
-                    return .rateLimited(Self.parseRetryAfter(http))
+                    let retryAfter = Self.parseRetryAfter(http)
+                    noteOriginRefusal(status: status, retryAfter: retryAfter > 0 ? retryAfter : nil,
+                                      respondedBy: http.url)
+                    return .rateLimited(retryAfter)
                 }
                 if status != 200 && status != 206 {
                     if Self.isResolvedExpiryStatus(status) { invalidateResolvedURL() }
@@ -2865,7 +2956,8 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
         var retryAfter: TimeInterval = 0
         if Self.isRateLimitStatus(status) {
             retryAfter = Self.parseRetryAfter(http)
-            noteOriginRefusal(status: status, respondedBy: respondedBy)
+            noteOriginRefusal(status: status, retryAfter: retryAfter > 0 ? retryAfter : nil,
+                              respondedBy: respondedBy)
         }
         var headerMs: Double? = nil
         winCond.lock()
@@ -2973,6 +3065,7 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
         winCond.unlock()
         if let error, !(deliberateEnd && (error as? URLError)?.code == .cancelled) {
             EngineLog.emit("[AVIOReader] \(label) conn gen=\(generation) ended with error: \(error.localizedDescription)", category: .demux)
+            noteTransportSecurityFailure(error)
         }
         if isCurrentGen && isLive {
             EngineLog.emit("[AVIOReader] Live source: connection ended gen=\(generation) buffered=\(windowAhead / 1024)KB; reconnect will fire when buffer drains", category: .demux)
@@ -3212,7 +3305,7 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
         let config = URLSessionConfiguration.default
         config.urlCache = nil
         config.timeoutIntervalForRequest = 20
-        return URLSession(configuration: config, delegate: nil, delegateQueue: nil)
+        return URLSession(configuration: config, delegate: EngineTLS.sessionDelegate, delegateQueue: nil)
     }()
 
     /// Total size from a data-connection response: `Content-Range` total on a 206, or
@@ -3481,7 +3574,7 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
     /// No invalidation overhead.
     private static let chunkSession: URLSession = {
         let config = makeSessionConfig()
-        return URLSession(configuration: config, delegate: nil, delegateQueue: nil)
+        return URLSession(configuration: config, delegate: EngineTLS.sessionDelegate, delegateQueue: nil)
     }()
 
     /// #220: long-lived session for the persistent streaming path, paired with a per-task
@@ -3497,7 +3590,7 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
     ///
     /// Never invalidated. Releasing a connection is `task.cancel()` now, not session teardown.
     private static let persistentSession: URLSession = {
-        URLSession(configuration: makeSessionConfig(longLived: true), delegate: nil, delegateQueue: nil)
+        URLSession(configuration: makeSessionConfig(longLived: true), delegate: EngineTLS.sessionDelegate, delegateQueue: nil)
     }()
 
     /// Outcome of an abortable semaphore wait (issue #27).
@@ -3612,7 +3705,10 @@ final class AVIOReader: AVIOProvider, @unchecked Sendable {
 
         // A truncating cancel is this reader hanging up on purpose, so the cancellation error it
         // produces is not a failed fetch: the prefix the request asked for is in hand (#255).
-        if let err = delegate.error, !delegate.truncated { throw err }
+        if let err = delegate.error, !delegate.truncated {
+            noteTransportSecurityFailure(err)
+            throw err
+        }
         guard let response = delegate.response else { throw AVIOReaderError.noResponse }
         if delegate.truncated {
             EngineLog.emit(
@@ -3768,6 +3864,15 @@ private final class PersistentReadDelegate: NSObject, URLSessionDataDelegate, @u
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        EngineTLS.resolve(challenge, completionHandler: completionHandler)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
         willPerformHTTPRedirection response: HTTPURLResponse,
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
@@ -3822,6 +3927,13 @@ private final class PersistentReadDelegate: NSObject, URLSessionDataDelegate, @u
         didFinishCollecting metrics: URLSessionTaskMetrics
     ) {
         ReaderTransportLog.note(metrics, for: originURL)
+        let hops = metrics.transactionMetrics.compactMap(AVIOReader.hopTiming)
+        if let line = AVIOReader.slowFirstByteLine(
+            taskSeconds: metrics.taskInterval.duration,
+            hops: hops
+        ) {
+            EngineLog.emit(line, category: .engine)
+        }
     }
 }
 
@@ -3848,6 +3960,15 @@ private final class ChunkFetchDelegate: NSObject, URLSessionDataDelegate, @unche
     init(extraHeaders: [String: String], bodyLimit: Int?) {
         self.extraHeaders = extraHeaders
         self.bodyLimit = bodyLimit
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        EngineTLS.resolve(challenge, completionHandler: completionHandler)
     }
 
     func urlSession(
@@ -3973,6 +4094,15 @@ private final class StreamingDelegate: NSObject, URLSessionDataDelegate {
 
     func urlSession(
         _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        EngineTLS.resolve(challenge, completionHandler: completionHandler)
+    }
+
+    func urlSession(
+        _ session: URLSession,
         dataTask: URLSessionDataTask,
         didReceive response: URLResponse,
         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
@@ -4018,6 +4148,15 @@ private final class ProbeDelegate: NSObject, URLSessionDataDelegate, @unchecked 
 
     init(extraHeaders: [String: String]) {
         self.extraHeaders = extraHeaders
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        EngineTLS.resolve(challenge, completionHandler: completionHandler)
     }
 
     func urlSession(
@@ -4279,6 +4418,10 @@ enum AVIOReaderError: Error, Equatable, CustomStringConvertible, LocalizedError 
     /// instead of the AVERROR_INVALIDDATA FFmpeg reports for an empty or error-page stream, and so the
     /// error page never reaches the demuxer.
     case httpStatus(Int)
+    /// AE#495: the transport was refused over certificate trust, so no body ever existed. Typed for
+    /// the same reason `httpStatus` is: without it the open surfaces FFmpeg's invalid data and a
+    /// self-signed origin reads as a corrupt file.
+    case transportSecurityFailed(code: Int)
 
     var description: String {
         switch self {
@@ -4288,6 +4431,8 @@ enum AVIOReaderError: Error, Equatable, CustomStringConvertible, LocalizedError 
         case .hlsPlaylistOnRawLivePath: return "HLS playlist supplied to the raw live path"
         case .hlsPlaylistOnVODPath: return "HLS playlist supplied to the VOD loopback path"
         case .httpStatus(let status): return "Origin answered HTTP \(status) for the source"
+        case .transportSecurityFailed(let code):
+            return TransportSecurityFailure.sentence(for: code)
         }
     }
 

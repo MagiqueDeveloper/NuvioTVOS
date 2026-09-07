@@ -8,13 +8,10 @@ import AetherLibavutil
 import AetherLibswscale
 
 /// libavcodec software video decoder for codecs without VideoToolbox support (e.g. AV1/dav1d on Apple TV).
-/// AV1's common planar output uses the Metal YUV converter when available; sws_scale remains the
-/// failure-safe conversion path for every other codec, format, or runtime configuration.
+/// Planar software output is converted to NV12/P010 with sws_scale.
 final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
 
     private var codecContext: UnsafeMutablePointer<AVCodecContext>?
-    /// Latched at open so the AV1-only Metal policy cannot accidentally affect another codec.
-    private var codecID: AVCodecID = AV_CODEC_ID_NONE
     // FFmpeg 8.x exposes SwsContext as a real struct (7.x was OpaquePointer); pointer type must match or call sites miscompile.
     private var swsContext: UnsafeMutablePointer<SwsContext>?
     private var timeBase: AVRational = AVRational(num: 1, den: 90000)
@@ -46,12 +43,23 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
     private var poolHeight = 0
     private var poolIs10Bit = false
 
-    /// A converter and its diagnostics live for one decoder session. A failed command/pipeline
-    /// disables further attempts for that session, preventing a per-frame fallback storm.
-    private var metalConverter: MetalYUVConverter?
-    private var metalDisabledForSession = false
-    private var loggedMetalPath = false
-    private var loggedMetalFallback = false
+    /// Set by SoftwarePlaybackHost before open. The 4K dav1d frame-delay policy is VOD-only.
+    var isLiveStream = false
+
+    private var performance = SWPerformanceSnapshot.zero
+
+    var performanceSnapshot: SWPerformanceSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return performance
+    }
+
+    var filmGrainDebugValue: String {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let ctx = codecContext else { return "-" }
+        return (ctx.pointee.properties & UInt32(FF_CODEC_PROPERTY_FILM_GRAIN)) != 0 ? "on" : "off"
+    }
 
     /// Skip pre-seek frames; decoded for reference but not converted.
     /// Guarded by `skipLock` not `lock`: emit() runs with `lock` held, so a same-lock accessor would deadlock.
@@ -61,6 +69,12 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
         set { skipLock.lock(); _skipUntilPTS = newValue; skipLock.unlock() }
     }
     private var _skipUntilPTS: CMTime?
+
+    /// AE#492: guarded by `lock`, the same one `flush()` and `decode(packet:epoch:)` take.
+    private var _feedEpoch: UInt64 = 0
+    var feedEpoch: UInt64 {
+        lock.lock(); defer { lock.unlock() }; return _feedEpoch
+    }
     private let skipLock = NSLock()
 
     /// Clear the skip threshold only if it is still the one we acted on.
@@ -82,6 +96,14 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
     /// Deinterlacer selection + cadence from LoadOptions. Set by the host BEFORE `open`;
     /// applied to the filter there (mutating it mid-stream would need a graph rebuild).
     var deinterlaceConfig = DeinterlaceConfig()
+
+    /// AE#499: what the container declared about colour, captured at `open` before a single frame
+    /// exists. A decoded frame carries the VUI alone, and a remux whose VUI is empty would otherwise
+    /// reach `attachColorSpace` as an untagged picture, so an HDR10 file decoded in software lost its
+    /// PQ / BT.2020 attachments while the same file through the hardware decoder (which reads
+    /// `codecpar`) kept them. Written once in `open`, before the host can feed a packet, and read on
+    /// the decode thread afterwards, the same discipline `use10Bit` and the other open-time fields keep.
+    private var containerColor = ColorDescription.unspecified
 
     /// Deinterlaced frames dropped for carrying no PTS (see the drop site in decode()). Guarded by `lock`.
     private var droppedUntimestampedFields = 0
@@ -109,8 +131,6 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
         }
 
         timeBase = stream.pointee.time_base
-        codecID = codecpar.pointee.codec_id
-
         // Container SAR fallback; see streamSAR. Frames usually carry their own (MPEG-2 seq header, from frame 1).
         //
         // Both fields, because they carry different sources and only one of them is the container's.
@@ -151,12 +171,22 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
             return AV_PIX_FMT_YUV420P
         }
 
-        ctx.pointee.thread_count = Int32(ProcessInfo.processInfo.activeProcessorCount)
+        let tuning = Dav1dDecodeTuningPolicy.tuning(
+            codecID: codecpar.pointee.codec_id,
+            width: codecpar.pointee.width,
+            height: codecpar.pointee.height,
+            isLive: isLiveStream,
+            availableThreadCount: ProcessInfo.processInfo.activeProcessorCount
+        )
+        ctx.pointee.thread_count = Int32(tuning.threadCount)
         ctx.pointee.thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE
 
         // Belt-and-suspenders hwaccel=none: some decoders ignore get_format.
         var opts: OpaquePointer?
         av_dict_set(&opts, "hwaccel", "none", 0)
+        if let maximumFrameDelay = tuning.maximumFrameDelay {
+            av_dict_set(&opts, "max_frame_delay", "\(maximumFrameDelay)", 0)
+        }
 
         guard avcodec_open2(ctx, codec, &opts) >= 0 else {
             av_dict_free(&opts)
@@ -164,16 +194,20 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
         }
         av_dict_free(&opts)
 
+        containerColor = ColorDescription(codecpar: codecpar)
         let bitsPerSample = codecpar.pointee.bits_per_raw_sample
         let isHDRTransfer = ColorAttachments.isHDRTransfer(codecpar.pointee.color_trc)
         use10Bit = bitsPerSample > 8 || isHDRTransfer
-        metalConverter = codecID == AV_CODEC_ID_AV1 ? MetalYUVConverter() : nil
-        metalDisabledForSession = false
-        loggedMetalPath = false
-        loggedMetalFallback = false
+        performance = .zero
 
         // Release-visible log (no #if DEBUG): needed for TestFlight users and DrHurt #4 black-screen reports.
-        EngineLog.emit("[SWDecoder] Opened: \(codecpar.pointee.width)x\(codecpar.pointee.height), codec=\(String(cString: codec.pointee.name)), threads=\(ctx.pointee.thread_count), \(use10Bit ? "10-bit" : "8-bit")", category: .swPlayback)
+        EngineLog.emit(
+            "[SWDecoder] Opened: \(codecpar.pointee.width)x\(codecpar.pointee.height), "
+            + "codec=\(String(cString: codec.pointee.name)), threads=\(ctx.pointee.thread_count), "
+            + "max_frame_delay=\(tuning.maximumFrameDelay.map(String.init) ?? "default"), "
+            + "\(use10Bit ? "10-bit" : "8-bit")",
+            category: .swPlayback
+        )
     }
 
     /// #407: the timestamp to put on a decoded frame that carries none, or nil when the frame is
@@ -212,16 +246,26 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
     /// an error, and returning on it both dropped the packet and left the output queue full, so
     /// every subsequent send hit the same wall: video wedged permanently until a seek flushed
     /// the decoder, while audio kept playing.
-    func decode(packet: UnsafeMutablePointer<AVPacket>) {
+    func decode(packet: UnsafeMutablePointer<AVPacket>, epoch: UInt64? = nil) {
         lock.lock()
+        // AE#492: a packet decided on before a flush must not be sent after it. Checked here rather
+        // than at the caller because only this lock orders the two: `flush()` takes it to retire the
+        // epoch, so either the send happens first and the flush drops what it produced, or the flush
+        // happens first and the send never runs.
+        if let epoch, epoch != _feedEpoch { lock.unlock(); return }
         guard let ctx = codecContext else { lock.unlock(); return }
+        performance.videoPacketCalls &+= 1
+        var decodeStarted = DispatchTime.now().uptimeNanoseconds
         var sendRet = avcodec_send_packet(ctx, packet)
+        performance.videoDecodeNanoseconds &+= DispatchTime.now().uptimeNanoseconds - decodeStarted
         lock.unlock()
 
         if Self.disposition(forSendResult: sendRet) == .drainAndRetry {
             drainDecodedFrames()
             lock.lock()
+            decodeStarted = DispatchTime.now().uptimeNanoseconds
             sendRet = codecContext == nil ? FFmpegErr.einval : avcodec_send_packet(ctx, packet)
+            performance.videoDecodeNanoseconds &+= DispatchTime.now().uptimeNanoseconds - decodeStarted
             lock.unlock()
         }
         if Self.disposition(forSendResult: sendRet) == .dropped, !loggedSendFailure {
@@ -248,8 +292,14 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
         while true {
             lock.lock()
             guard codecContext != nil else { lock.unlock(); break }
+            let decodeStarted = DispatchTime.now().uptimeNanoseconds
             let ret = avcodec_receive_frame(ctx, f)
+            performance.videoDecodeNanoseconds &+= DispatchTime.now().uptimeNanoseconds - decodeStarted
             guard ret >= 0 else { lock.unlock(); break }
+
+            // AE#499: fill the fields the VUI left open from the container's declaration BEFORE any
+            // consumer reads the frame, for the same reason the timestamp repair below runs here.
+            ColorDescription.backfill(frame: f, container: containerColor)
 
             // #407: repair the frame's own timestamp BEFORE anything reads it. A frame that reaches
             // the renderer with no PTS is unschedulable and gets dropped there, so every consumer
@@ -386,7 +436,10 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
             attachColorSpace(from: f, to: pixelBuffer)
             attachPixelAspectRatio(from: f, to: pixelBuffer)
         } else {
-            guard let converted = convertFrameToPixelBuffer(f) else { return }
+            let conversionStarted = DispatchTime.now().uptimeNanoseconds
+            let converted = convertFrameToPixelBuffer(f)
+            performance.videoConversionNanoseconds &+= DispatchTime.now().uptimeNanoseconds - conversionStarted
+            guard let converted else { return }
             pixelBuffer = converted
         }
 
@@ -409,12 +462,16 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
             onFirstHDR10PlusDetected?()
         }
 
+        performance.videoFrames &+= 1
         onFrame?(pixelBuffer, cmPTS, hdr10PlusData)
     }
 
     func flush() {
         lock.lock()
         defer { lock.unlock() }
+        // AE#492: retires every packet a caller had already decided to send. Bumped under the lock,
+        // so a feed that has not reached `avcodec_send_packet` yet is refused from here on.
+        _feedEpoch &+= 1
         // Deinterlacer temporal references are stale across seeks; drop the graph (lazily rebuilt on next interlaced frame).
         deinterlacer.teardown()
         guard let ctx = codecContext else { return }
@@ -465,8 +522,6 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
         poolWidth = 0
         poolHeight = 0
         poolIs10Bit = false
-        metalConverter = nil
-        metalDisabledForSession = false
         if let session = transferSession {
             VTPixelTransferSessionInvalidate(session)
             transferSession = nil
@@ -565,43 +620,6 @@ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
 
         attachColorSpace(from: frame, to: pb)
         attachPixelAspectRatio(from: frame, to: pb)
-
-        let metalFormatSupported = MetalYUVConverter.supports(codecID: codecID, pixelFormat: srcFmt)
-        let metalBitDepthMatchesPool = (srcFmt == AV_PIX_FMT_YUV420P10LE) == use10Bit
-        if !metalDisabledForSession,
-           codecID == AV_CODEC_ID_AV1,
-           metalFormatSupported,
-           metalBitDepthMatchesPool,
-           let converter = metalConverter {
-            let fullRange = srcFmt == AV_PIX_FMT_YUVJ420P || frame.pointee.color_range == AVCOL_RANGE_JPEG
-            switch converter.convert(
-                frame: frame, destination: pb, pixelFormat: srcFmt, fullRange: fullRange
-            ) {
-            case .converted:
-                if !loggedMetalPath {
-                    loggedMetalPath = true
-                    EngineLog.emit("[SWDecoder] AV1 Metal YUV conversion enabled (GPU-complete)", category: .swPlayback)
-                }
-                return pb
-            case let .unavailable(reason), let .failed(reason):
-                metalDisabledForSession = true
-                if !loggedMetalFallback {
-                    loggedMetalFallback = true
-                    EngineLog.emit(
-                        "[SWDecoder] AV1 Metal YUV conversion unavailable (\(reason)); falling back to sws_scale",
-                        category: .swPlayback
-                    )
-                }
-            }
-        } else if codecID == AV_CODEC_ID_AV1,
-                  (!metalFormatSupported || !metalBitDepthMatchesPool || metalConverter == nil),
-                  !loggedMetalFallback {
-            loggedMetalFallback = true
-            EngineLog.emit(
-                "[SWDecoder] AV1 Metal YUV conversion unsupported for pixel format/bit depth (format=\(srcFmt.rawValue), pool10=\(use10Bit)); falling back to sws_scale",
-                category: .swPlayback
-            )
-        }
 
         CVPixelBufferLockBaseAddress(pb, [])
         defer { CVPixelBufferUnlockBaseAddress(pb, []) }

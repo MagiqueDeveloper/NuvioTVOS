@@ -40,6 +40,10 @@ You provide the transport bar. You provide the dropdowns. You provide the pretty
 - [NowSeen](https://discord.com/invite/7AFh3Hy8p4): IPTV / Manifest app for tvOS.
 - [KSKPix](https://ksktech.dev/kskpix): KSKPix is a premium IPTV player for Live TV, Movies & Series.
 - [Syravo](https://syravo.app): Xtream Codes, Jellyfin and radio client for iPhone, iPad and Apple TV.
+- [KIPTV](https://kiptv.app): Premium, cross-platform IPTV Player.
+- [Silo](https://github.com/Silo-Server/silo-apple): native iOS, tvOS and macOS client for the Silo self-hosted media server.
+- [File Box](https://apps.apple.com/app/id6765818194): File Box is a simple and practical local file manager that makes it easy to manage, view, organize, and process your files on iPhone and iPad.
+- [Moonfin](https://github.com/Moonfin-Client/Moonfin-Core): A multi-platform third party Jellyfin client.
 <!-- used-by:end -->
 
 Shipping something on AetherEngine? [Submit it](https://github.com/superuser404notfound/AetherEngine/issues/new?template=used-by-submission.yml) to get listed here and on [aetherengine.superuser404.de](https://aetherengine.superuser404.de).
@@ -70,6 +74,7 @@ A scannable summary; the depth for each row lives in **[docs/formats.md](docs/fo
 | Live / DVR | Unbounded live + optional timeshift; direct HLS ingest with AES-128 clear-key and SSAI ad-pod handling |
 | Custom input | Play any byte source via the `IOReader` protocol (`load(source:)`) |
 | Network | SMB2/3 shares via the optional `AetherEngineSMB` product (NTLMv2 / guest, read-only) |
+| Certificate trust | A media server behind a self-signed or private-CA certificate plays once the host answers for it: `EngineTLS.serverTrustEvaluator` is asked per challenge about the origin the challenge came from, so a LAN address behind a private certificate and a WAN address with a real one are decided separately. Covers every session the engine owns, and the native remote-HLS route too, where AVPlayer asks no delegate of its own: there the engine stands a loopback relay in front of the origin so the handshake runs where the evaluator is asked. The relay is mounted only for an origin the system actually refuses, and media is relayed as it arrives rather than read whole |
 
 ## How it compares
 
@@ -140,7 +145,7 @@ try await player.load(url: videoURL, options: .init(
     httpHeaders: headers,              // attached to every demux + segment fetch
     matchContentEnabled: matchContent  // tvOS Match Content master toggle
 ))
-try await player.reloadAtCurrentPosition()                      // background reopen, preserves options
+try await player.reloadAtCurrentPosition()                      // background reopen, preserves options + transport
 try await player.load(url: trackURL, options: .init(audioOnly: true))   // lean audio path
 
 // Transport
@@ -185,6 +190,15 @@ player.$videoRoute     // pipeline actually serving the session: .remoteBypass (
                        // bypass and the loopback, mid-session too. Branch on this where behaviour
                        // differs per pipeline, above all who draws subtitles: on .remoteBypass
                        // AVPlayer renders the origin's renditions, elsewhere the host renders.
+player.$audioDelivery  // how the audio reaches the renderer: .streamCopy / .bridged / .decoded /
+                       // .noAudioInSource / .playerManaged (AVFoundation owns it) / .none, and
+                       // .droppedNoPipeline: the source HAS audio and none of it could be
+                       // delivered (no decoder in this build, or the bridge could not be built),
+                       // so the session plays video-only and silently. That is the value a
+                       // fallback ladder demotes on, the same way it demotes on the
+                       // PlaybackErrorKind.audioBridgeProducedNoOutput at the other end of the
+                       // cascade. Classify on this; $activeAudioDecoder is the label for a human
+                       // and cannot separate a source without audio from one that lost it.
 player.$hasFirstFrameReadyForDisplay
                        // the running path has a first frame ready for display, for the media THIS
                        // load opened: the edge a black cover comes off on. readyToPlay is not that
@@ -325,7 +339,7 @@ Subtitle cues land in raw source PTS; render the overlay against `player.sourceT
 Install via Swift Package Manager:
 
 ```swift
-.package(url: "https://github.com/superuser404notfound/AetherEngine", from: "6.57.0")
+.package(url: "https://github.com/superuser404notfound/AetherEngine", from: "6.72.0")
 ```
 
 Three samples ship in `Examples/`:
@@ -470,9 +484,30 @@ playerVC.appliesPreferredDisplayCriteriaAutomatically = false
 try await engine.load(url: url, options: LoadOptions(
     suppressDisplayCriteria: false,      // default; engine writes criteria
     matchContentEnabled: matchContent,   // tvOS Match Content master toggle
-    panelIsInHDRMode: panelInHDRMode     // current EDR-headroom > 1.0
+    panelIsInHDRMode: panelInHDRMode,    // assertion: the panel is presenting HDR now
+    panelPresentsDolbyVision: false      // assertion: this display presents Dolby Vision
 ))
 ```
+
+**Both panel flags are assertions, not readings, and both default to `false`.** `panelIsInHDRMode` is an
+OR term over the engine's own EDR-headroom readout rather than a replacement for it: that readout answers
+only around a dynamic-range transition, so an Apple TV whose output format is locked to HDR never makes one
+and reads as an SDR panel forever ([#459](https://github.com/superuser404notfound/AetherEngine/issues/459)).
+`panelPresentsDolbyVision` covers the capability the engine cannot observe at all on macOS, where
+`AVPlayer.availableHDRModes` does not exist and HDR eligibility answers HDR10 and HLG but not Dolby Vision
+([#493](https://github.com/superuser404notfound/AetherEngine/issues/493)). An assertion only ever adds, so
+neither flag can hide a capability the system reports, and a wrong one costs a single in-place
+media-playlist fallback (`-11868` / `-11848`) at the same position rather than the item.
+
+That fallback covers the failure class AVPlayer reports as an item failure, which is not the whole space,
+and the gap sits on tvOS. An asserted Profile 8.1 is served the way a DV panel is served (`dvvC` in the
+sample entry plus `SUPPLEMENTAL-CODECS`), and on an HDR10-only panel that packaging was measured to reach
+`readyToPlay`, play for a second or two and then stall with `-15628` in the item's error log
+([#4](https://github.com/superuser404notfound/AetherEngine/issues/4), 2026-05-26). A stall is not an item
+failure, so nothing catches it. On tvOS the flag for a display without Dolby Vision is
+`forceDolbyVisionOnNonDVDisplay`, which serves that source as a Profile 5 instead and is device-verified on
+exactly that panel class ([#455](https://github.com/superuser404notfound/AetherEngine/issues/455));
+asserting DV turns it off, because it is gated on the display having none.
 
 `suppressDisplayCriteria` defaults to `false`, so the engine-driven path is the default: `apply()` runs synchronously inside `load(url:)`, `waitForSwitch` blocks until the panel reaches the target mode (or 5 s timeout), then `replaceCurrentItem` runs against an already-correct panel.
 
@@ -502,6 +537,22 @@ If a second FFmpeg in the app takes those symbols, that line turns into an `ERRO
 
 The handler fires from whatever thread emitted the line (demuxer, producer pump, local server, audio bridge), so it must be thread-safe and non-blocking; serialize onto a queue before writing to a file. Per-segment trace lines are emitted at `.verbose` and reach os_log's debug level only, never the handler, so the mirrored stream stays readable. `aetherctl` installs exactly this handler, which is why the CLI prints what the app hides.
 
+**Reading the log out of a GUI host is its own problem, and it is worth solving before you need it.** An
+app launched from Finder or `open` has no stdout you can read, so the handler above has nowhere to print
+to; a reporter on #493 lost most of a measurement session to this. Install the handler and write it to a
+file you can name, flushing per line, and do it on every build rather than only when hunting something:
+
+```swift
+EngineLog.handler = { line in DiagnosticFile.shared.append(line) }  // your own serial queue + flush
+```
+
+The os_log side does work and is worth knowing as the fallback, but it needs a time window: `log show
+--last 10m --predicate 'subsystem == "de.superuser404.AetherEngine"'` returns the session's lines here on
+macOS 26.5. Without `--last`, or against a bare `log show`, the same predicate reads as if the engine
+never logged. Lines are emitted with `.public` privacy, so they arrive whole rather than as `<private>`,
+which is also why [`LogRedaction`](Sources/AetherEngine/Diagnostics/LogRedaction.swift) scrubs credentials
+at the funnel: what reaches your file is what reaches a sysdiagnose.
+
 ## Non-goals
 
 Things AetherEngine deliberately doesn't do, so you don't have to read the source to find out:
@@ -528,10 +579,10 @@ Browse all of this as a searchable site at **[aetherengine.superuser404.de](http
 AetherEngine uses [Semantic Versioning](https://semver.org). The public API surface, every `public` declaration in `Sources/AetherEngine/`, is the stability contract. **Major** removes / renames public symbols or breaks adopters; **Minor** adds public API or codec / format support; **Patch** fixes bugs with no public API change. `internal` types are not part of the contract.
 
 ```swift
-.package(url: "https://github.com/superuser404notfound/AetherEngine", from: "6.57.0")
+.package(url: "https://github.com/superuser404notfound/AetherEngine", from: "6.72.0")
 ```
 
-Pin to `.upToNextMinor(from: "6.57.0")` for stricter teams that prefer to opt into minor bumps explicitly.
+Pin to `.upToNextMinor(from: "6.72.0")` for stricter teams that prefer to opt into minor bumps explicitly.
 
 ## Requirements
 

@@ -2408,6 +2408,31 @@ final class ContinueWatchingDismissStoreTests: XCTestCase {
         XCTAssertEqual(item.upNextBadgeText, "AIRS TODAY")
     }
 
+    func testEpisodeReleaseDatePreservesISO8601TimestampAndDateOnlyFallback() {
+        guard let timestamp = EpisodeReleasePolicy.releaseDate(for: "2026-08-13T10:20:30.123Z") else {
+            return XCTFail("fractional ISO8601 timestamp should parse")
+        }
+        guard let wholeSecond = EpisodeReleasePolicy.releaseDate(for: "2026-08-13T10:20:30Z") else {
+            return XCTFail("whole-second ISO8601 timestamp should parse")
+        }
+        XCTAssertEqual(timestamp.timeIntervalSince1970, wholeSecond.timeIntervalSince1970 + 0.123, accuracy: 0.001)
+
+        guard let timezoneTimestamp = EpisodeReleasePolicy.releaseDate(for: "2026-08-13T10:20:30+02:00") else {
+            return XCTFail("timezone ISO8601 timestamp should parse")
+        }
+        guard let equivalentUTC = EpisodeReleasePolicy.releaseDate(for: "2026-08-13T08:20:30Z") else {
+            return XCTFail("equivalent UTC timestamp should parse")
+        }
+        XCTAssertEqual(timezoneTimestamp.timeIntervalSince1970, equivalentUTC.timeIntervalSince1970, accuracy: 0.001)
+
+        let dateOnly = EpisodeReleasePolicy.releaseDate(for: " 2026-08-13 ")
+        XCTAssertEqual(
+            dateOnly,
+            EpisodeReleasePolicy.releaseDate(for: "2026-08-13T00:00:00Z")
+        )
+        XCTAssertNil(EpisodeReleasePolicy.releaseDate(for: "not-a-date"))
+    }
+
     func testEpisodeGuideDateOverridesAStaleStoredAirDate() {
         let today = isoDay(daysAgo: 0)
         let item = ContinueWatchingItem(
@@ -2566,6 +2591,51 @@ final class ContinueWatchingDismissStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(sorted.map(\.meta.id), ["newer", "tie-first", "tie-second", "older"])
+    }
+
+    func testContinueWatchingContentEqualityIncludesMetadataAndStoredEnrichment() {
+        let base = ContinueWatchingItem(
+            meta: makeDatedMeta(id: "same", released: "2026-01-01"),
+            streamUrl: "https://example.test/one",
+            position: 10,
+            duration: 100,
+            lastWatchedAt: Date(timeIntervalSince1970: 100),
+            released: "2026-01-01",
+            episodeTitleOverride: "Episode",
+            episodeOverviewOverride: "Overview",
+            episodeThumbnailOverride: "thumb",
+            isUpNext: true,
+            upNextSeedSeason: 1
+        )
+        let changedMeta = ContinueWatchingItem(
+            meta: makeDatedMeta(id: "same", released: "2026-01-02"),
+            streamUrl: base.streamUrl,
+            position: base.position,
+            duration: base.duration,
+            lastWatchedAt: base.lastWatchedAt,
+            released: base.released,
+            episodeTitleOverride: base.episodeTitleOverride,
+            episodeOverviewOverride: base.episodeOverviewOverride,
+            episodeThumbnailOverride: base.episodeThumbnailOverride,
+            isUpNext: base.isUpNext,
+            upNextSeedSeason: base.upNextSeedSeason
+        )
+        XCTAssertFalse(base.isContentEqual(to: changedMeta))
+
+        let changedOverview = ContinueWatchingItem(
+            meta: base.meta,
+            streamUrl: base.streamUrl,
+            position: base.position,
+            duration: base.duration,
+            lastWatchedAt: base.lastWatchedAt,
+            released: base.released,
+            episodeTitleOverride: base.episodeTitleOverride,
+            episodeOverviewOverride: "changed",
+            episodeThumbnailOverride: base.episodeThumbnailOverride,
+            isUpNext: base.isUpNext,
+            upNextSeedSeason: base.upNextSeedSeason
+        )
+        XCTAssertFalse(base.isContentEqual(to: changedOverview))
     }
 
     func testContinueWatchingStreamingStyleSortsReleasedAndUpcomingGroups() {
@@ -2880,4 +2950,58 @@ final class ContinueWatchingDismissStoreTests: XCTestCase {
         )
     }
 
+    // MARK: - Expired Stream & Resume Protection Tests
+
+    func testLastPlaybackStreamStoreRemoveEvictsEntry() {
+        let metaId = "tt-expired-stream-test"
+        LastPlaybackStreamStore.save(
+            metaId: metaId,
+            url: "https://expired.example.com/stream.m3u8",
+            httpHeaders: ["Authorization": "Bearer expired"],
+            season: 1,
+            episode: 3
+        )
+        XCTAssertNotNil(LastPlaybackStreamStore.load(metaId: metaId, season: 1, episode: 3))
+
+        LastPlaybackStreamStore.remove(metaId: metaId, season: 1, episode: 3)
+        XCTAssertNil(LastPlaybackStreamStore.load(metaId: metaId, season: 1, episode: 3))
+    }
+
+    @MainActor
+    func testTraktAndSimklContinueWatchingCheckpointsPreserveResumePosition() async {
+        let series = makeSeries()
+        TraktProgressService.recordLocalPlayback(
+            meta: series,
+            position: 780, // 13 minutes in (27 min left of 40m)
+            duration: 2400,
+            season: 1,
+            episode: 1,
+            source: .trakt,
+            notify: false
+        )
+
+        let resolved = TraktProgressService.currentContinueWatchingItem(for: series, source: .trakt)
+        XCTAssertNotNil(resolved)
+        XCTAssertEqual(resolved?.position, 780)
+        XCTAssertEqual(resolved?.duration, 2400)
+        XCTAssertEqual(resolved?.remainingText, "27m left")
+
+        // Simkl progress record
+        TraktProgressService.recordLocalPlayback(
+            meta: series,
+            position: 1200, // 20 min in (20 min left of 40m)
+            duration: 2400,
+            season: 1,
+            episode: 2,
+            source: .simkl,
+            notify: false
+        )
+
+        let resolvedSimkl = TraktProgressService.currentContinueWatchingItem(for: series, source: .simkl)
+        XCTAssertNotNil(resolvedSimkl)
+        XCTAssertEqual(resolvedSimkl?.position, 1200)
+        XCTAssertEqual(resolvedSimkl?.duration, 2400)
+        XCTAssertEqual(resolvedSimkl?.remainingText, "20m left")
+    }
 }
+
