@@ -634,11 +634,29 @@ class PlayerViewModel: ObservableObject {
 
     private static func isLiveContentType(_ type: String) -> Bool {
         switch type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "channel", "live", "livetv", "live-tv", "tv", "iptv", "radio":
+        case "channel", "channels", "live", "livetv", "live-tv", "live_tv", "iptv", "radio", "sports", "sport", "stream", "streams", "event", "events", "broadcast", "feed":
             return true
         default:
             return false
         }
+    }
+
+    private static func isLiveStream(meta: NuvioMeta, url: URL?) -> Bool {
+        if isLiveContentType(meta.type) { return true }
+        let id = meta.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if id.hasPrefix("iptv:") || id.hasPrefix("live:") || id.hasPrefix("channel:") || id.hasPrefix("stream:") {
+            return true
+        }
+        let name = meta.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if name.hasPrefix("now:") || name.hasPrefix("live:") || name.hasPrefix("[live]") || name.hasPrefix("(live)") {
+            return true
+        }
+        if let urlString = url?.absoluteString.lowercased() {
+            if urlString.contains("/live/") || urlString.contains("/iptv/") || urlString.contains("live.m3u8") {
+                return true
+            }
+        }
+        return false
     }
 
     /// Applies all per-stream state for a title/episode. Shared by the initial
@@ -683,7 +701,7 @@ class PlayerViewModel: ObservableObject {
         isLoadingExternalSubtitles = false
         self.title = meta.name
         self.subtitle = subtitle
-        self.isLiveStream = Self.isLiveContentType(meta.type)
+        self.isLiveStream = Self.isLiveStream(meta: meta, url: url)
         self.livePlaybackHasStarted = false
         self.liveBufferingBeganAt = nil
         self.status = .buffering
@@ -1552,6 +1570,24 @@ class PlayerViewModel: ObservableObject {
         let rawCurrent = Double(c.positionMs) / 1000.0
         let rawDuration = Double(c.durationMs) / 1000.0
         let latestTime = PlayerTime(current: rawCurrent, duration: rawDuration)
+
+        // Dynamically detect live streams (streams without finite duration when active frames are decoding).
+        if !isLiveStream,
+           c.isPlayerPlaying,
+           !c.isPlayerLoading,
+           !c.isPlayerEnded,
+           !isAwaitingStreamStart,
+           c.durationMs <= 0,
+           time.duration <= 0 {
+            isLiveStream = true
+        } else if isLiveStream,
+                  let activeMeta,
+                  !Self.isLiveStream(meta: activeMeta, url: activeStreamURL.flatMap(URL.init(string:))),
+                  c.durationMs > 0,
+                  c.hasCoherentTimeSample {
+            isLiveStream = false
+        }
+
         let isPreSeekSettlingSample: Bool = {
             guard let checkpoint = explicitSeekProgressCheckpoint else { return false }
             let seekConfirmed = abs(latestTime.current - checkpoint.time.current) <= 2
@@ -1784,7 +1820,15 @@ class PlayerViewModel: ObservableObject {
                           externalFilename: $0.externalFilename,
                           isNativelyRenderedSubtitle: $0.isNativelyRenderedSubtitle)
         }
-        let anySelected = subs.contains { $0.isSelected }
+        if let selectedURL = pendingSelectedExternalSubtitleURL,
+           let selectedTrack = subs.first(where: { $0.externalFilename == selectedURL }) {
+            subs = subs.map { var t = $0; t.isSelected = (t.id == selectedTrack.id); return t }
+            pendingSelectedExternalSubtitleURL = nil
+            if let id = Int(selectedTrack.id) {
+                c.selectSubtitle(id)
+            }
+        }
+        let anySelected = subs.contains { $0.isSelected } || pendingSelectedExternalSubtitleURL != nil
         subs.insert(SubtitleTrack(id: "off", name: "Off", language: "",
                                   isSelected: !anySelected), at: 0)
         if subtitles != subs { subtitles = subs }
@@ -1793,11 +1837,6 @@ class PlayerViewModel: ObservableObject {
         applyAudioPreferenceIfNeeded()
         applySubtitlePreferenceIfNeeded()
         guard c === engine else { return }
-        if let selectedURL = pendingSelectedExternalSubtitleURL,
-           let selectedTrack = subtitles.first(where: { $0.externalFilename == selectedURL }) {
-            selectSubtitle(selectedTrack, persist: false)
-            pendingSelectedExternalSubtitleURL = nil
-        }
         if let selectedNativeTrack = subtitles.first(where: {
             $0.isSelected && $0.isNativelyRenderedSubtitle
         }) {
@@ -2519,6 +2558,7 @@ class PlayerViewModel: ObservableObject {
     // MARK: - Track selection
 
     func selectSubtitle(_ track: SubtitleTrack, persist: Bool = true) {
+        pendingSelectedExternalSubtitleURL = nil
         if track.isNativelyRenderedSubtitle,
            handoffForNativelyRenderedSubtitle(track, persist: persist) {
             subtitles = subtitles.map { var item = $0; item.isSelected = (item.id == track.id); return item }
@@ -2567,6 +2607,29 @@ class PlayerViewModel: ObservableObject {
         hdrModeToast = "Compatibility player (subtitle controls)"
         showPlayerToast("Compatibility player (subtitle controls)")
         return true
+    }
+
+    /// Returns true if an external subtitle is currently active or pending selection.
+    var hasSelectedExternalSubtitle: Bool {
+        if pendingSelectedExternalSubtitleURL != nil { return true }
+        return availableExternalSubtitles.contains { isExternalSubtitleSelected($0) }
+    }
+
+    /// Checks if a specific external subtitle is currently active in playback tracks,
+    /// pending activation, or was selected in the current session.
+    func isExternalSubtitleSelected(_ subtitle: NuvioSubtitle) -> Bool {
+        if let track = subtitles.first(where: { $0.externalFilename == subtitle.url }) {
+            return track.isSelected
+        }
+        if pendingSelectedExternalSubtitleURL == subtitle.url {
+            return true
+        }
+        if let currentSaved = pendingTrackSelection?.subtitle,
+           currentSaved.kind == .external,
+           currentSaved.externalURL == subtitle.url {
+            return true
+        }
+        return false
     }
 
     /// Selects an external subtitle from the panel: if mpv already loaded this
