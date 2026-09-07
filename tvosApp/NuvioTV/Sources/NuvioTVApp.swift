@@ -3174,6 +3174,15 @@ struct TVHomeView: View {
                 await reloadHomeAfterSyncedInputs(for: identity)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: TVCacheClearing.clearedNotification)) { _ in
+            rowScrollStore.removeAll()
+            store.reset()
+            homeReloadTask?.cancel()
+            let identity = contentIdentity
+            homeReloadTask = Task { @MainActor in
+                await reloadHomeAfterSyncedInputs(for: identity)
+            }
+        }
         .onDisappear {
             focusWork.cancelAll()
             homeReloadTask?.cancel()

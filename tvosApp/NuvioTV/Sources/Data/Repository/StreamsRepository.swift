@@ -28,6 +28,10 @@ final class StreamsRepository: ObservableObject {
     /// Actor-backed success-only cache (no permanent failure entries).
     private static let manifestCache = StreamManifestCache()
 
+    static func clearManifestCache() async {
+        await manifestCache.removeAll()
+    }
+
     private init() {}
 
     // MARK: - Request key

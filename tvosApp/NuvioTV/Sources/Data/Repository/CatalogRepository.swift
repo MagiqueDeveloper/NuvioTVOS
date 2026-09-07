@@ -320,6 +320,14 @@ final class CinemetaCatalogRepository: CatalogRepository {
         }
     }
 
+    /// Drops in-memory metadata so the next Home/details load re-fetches from the network.
+    static func clearMetadataCache() {
+        metadataCacheQueue.sync(flags: .barrier) {
+            cachedMetaById.removeAll(keepingCapacity: false)
+            cachedFullMetaIds.removeAll(keepingCapacity: false)
+        }
+    }
+
     func getHomeCatalogs() async throws -> [NuvioCatalog] {
         try await loadHomeCatalogs()
     }

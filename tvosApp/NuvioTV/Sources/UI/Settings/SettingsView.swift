@@ -6830,6 +6830,8 @@ private struct AdvancedSettingsView: View {
     @AppStorage(SettingsKey.playbackDebug) private var playbackDebug = false
     @State private var isSeedingTestHistory = false
     @State private var testHistoryStatus = ContinueWatchingTestData.status
+    @State private var isClearingCache = false
+    @State private var cacheStatus = ""
     @AppStorage(SettingsKey.focusHighlighter) private var focusHighlighter = false
     @AppStorage(SettingsKey.iCloudSyncEnabled) private var iCloudSyncEnabled = false
     @ObservedObject private var iCloudSyncManager = ICloudSettingsSyncManager.shared
@@ -7003,6 +7005,38 @@ private struct AdvancedSettingsView: View {
                     value: L10n.string("subtitle_style_reset", fallback: "Reset"),
                     accentColor: accentColor,
                     action: resetSettings
+                )
+            }
+
+            SettingsGroup(
+                title: L10n.string("tvos_settings_cache_title", fallback: "Cache"),
+                subtitle: L10n.string(
+                    "tvos_settings_cache_subtitle",
+                    fallback: "Free stuck artwork and Home row data without changing your settings"
+                )
+            ) {
+                SettingsActionRow(
+                    title: L10n.string("tvos_settings_clear_cache", fallback: "Clear Cache"),
+                    subtitle: L10n.string(
+                        "tvos_settings_clear_cache_subtitle",
+                        fallback: "Keeps settings; clears posters, catalog order, and row positions, then pulls fresh Home data"
+                    ),
+                    value: isClearingCache
+                        ? L10n.string("tvos_settings_clear_cache_working", fallback: "Working…")
+                        : (cacheStatus.isEmpty
+                            ? L10n.string("tvos_settings_clear_cache_action", fallback: "Clear")
+                            : cacheStatus),
+                    accentColor: accentColor,
+                    action: {
+                        guard !isClearingCache else { return }
+                        isClearingCache = true
+                        cacheStatus = ""
+                        Task { @MainActor in
+                            await TVCacheClearing.clearAndRefresh()
+                            cacheStatus = L10n.string("tvos_settings_clear_cache_done", fallback: "Done")
+                            isClearingCache = false
+                        }
+                    }
                 )
             }
         }

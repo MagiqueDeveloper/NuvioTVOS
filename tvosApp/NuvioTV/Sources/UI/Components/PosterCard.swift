@@ -1683,6 +1683,14 @@ actor PosterArtworkCache {
         cache.removeAllObjects()
     }
 
+    /// Memory + on-disk poster artwork. Used by Settings → Clear Cache.
+    func purgeAll() async {
+        cache.removeAllObjects()
+        inFlight.values.forEach { $0.cancel() }
+        inFlight.removeAll()
+        await PosterDiskCache.shared.purge()
+    }
+
     func image(for url: URL, maxPixelSize: Int) async -> UIImage? {
         let boundedPixelSize = min(max(maxPixelSize, 160), 1400)
         let key = "\(url.absoluteString)#\(boundedPixelSize)" as NSString
@@ -1815,6 +1823,18 @@ private actor PosterDiskCache {
         guard bytesWrittenSinceTrim >= trimInterval else { return }
         bytesWrittenSinceTrim = 0
         trim()
+    }
+
+    func purge() {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        for file in files {
+            try? fileManager.removeItem(at: file)
+        }
+        bytesWrittenSinceTrim = 0
+        posterURLSession.configuration.urlCache?.removeAllCachedResponses()
     }
 
     private func fileURL(for url: URL) -> URL {
