@@ -49,4 +49,65 @@ final class HomeLayoutSettingsTests: XCTestCase {
         defaults.set(false, forKey: SettingsKey.catalogAddonNames)
         XCTAssertFalse(defaults.bool(forKey: SettingsKey.catalogAddonNames))
     }
+
+    func testCatalogRowEqualityIncludesAddonNameVisibility() {
+        let meta = NuvioMeta(
+            id: "tt1",
+            name: "Title",
+            description: nil,
+            posterUrl: nil,
+            backgroundUrl: nil,
+            logoUrl: nil,
+            imdbId: nil,
+            tmdbId: nil,
+            type: "movie",
+            year: nil,
+            genres: nil,
+            rating: nil,
+            releaseInfo: nil,
+            runtime: nil,
+            cast: nil,
+            director: nil,
+            writer: nil,
+            certification: nil,
+            country: nil,
+            released: nil,
+            status: nil,
+            videos: nil,
+            trailerYtIds: nil,
+            externalRatings: nil
+        )
+        let shown = TVCatalogRow(
+            id: "row",
+            title: "Popular",
+            addonName: "Cinemeta",
+            showCatalogAddonNames: true,
+            horizontalEdgeInset: 0,
+            items: [meta],
+            initialFocusCardKey: nil,
+            landscapeFocusedId: nil,
+            onInitialFocusRequested: {},
+            onFocus: { _ in },
+            onBlur: { _ in },
+            onApproachEnd: { _ in },
+            onSelect: { _ in }
+        )
+        let hidden = TVCatalogRow(
+            id: "row",
+            title: "Popular",
+            addonName: "Cinemeta",
+            showCatalogAddonNames: false,
+            horizontalEdgeInset: 0,
+            items: [meta],
+            initialFocusCardKey: nil,
+            landscapeFocusedId: nil,
+            onInitialFocusRequested: {},
+            onFocus: { _ in },
+            onBlur: { _ in },
+            onApproachEnd: { _ in },
+            onSelect: { _ in }
+        )
+        XCTAssertNotEqual(shown, hidden)
+        XCTAssertEqual(shown, shown)
+    }
 }

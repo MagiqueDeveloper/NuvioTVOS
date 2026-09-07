@@ -47,11 +47,12 @@ enum CollectionFolderGridMetrics {
 struct TVLoadingCatalogRow: View {
     let title: String
     var addonName: String? = nil
+    /// Passed from Home so toggling the setting redraws rows wrapped in `.equatable()`.
+    var showCatalogAddonNames: Bool = true
 
     @AppStorage(SettingsKey.homeLayout) private var homeLayout = "Modern"
     @AppStorage(SettingsKey.posterLabels) private var posterLabels = false
     @AppStorage(SettingsKey.liquidGlassCards) private var liquidGlassCards = true
-    @AppStorage(SettingsKey.catalogAddonNames) private var catalogAddonNames = true
     @AppStorage(SettingsKey.theme) private var theme = SettingsAccent.white.rawValue
 
     private var cardWidth: CGFloat { homeLayout == "Compact" ? 170 : 210 }
@@ -71,7 +72,7 @@ struct TVLoadingCatalogRow: View {
                     .font(.custom("Inter-Bold", size: 30))
                     .foregroundColor(.white)
 
-                if catalogAddonNames, let addonName = addonName, !addonName.isEmpty {
+                if showCatalogAddonNames, let addonName = addonName, !addonName.isEmpty {
                     Text(addonName)
                         .font(.custom("Inter-SemiBold", size: 16))
                         .foregroundColor(SettingsAccent.color(for: theme))
@@ -111,6 +112,8 @@ struct TVCatalogRow: View {
     let id: String
     let title: String
     var addonName: String? = nil
+    /// Passed from Home so toggling the setting redraws rows wrapped in `.equatable()`.
+    var showCatalogAddonNames: Bool = true
     let horizontalEdgeInset: CGFloat
     let items: [NuvioMeta]
     var progressByItemId: [String: ContinueWatchingItem] = [:]
@@ -138,7 +141,6 @@ struct TVCatalogRow: View {
     @State private var scrollIndex: Int?
     @AppStorage(SettingsKey.homeLayout) private var homeLayout = "Modern"
     @AppStorage(SettingsKey.posterLabels) private var posterLabels = false
-    @AppStorage(SettingsKey.catalogAddonNames) private var catalogAddonNames = true
     @AppStorage(SettingsKey.theme) private var theme = SettingsAccent.white.rawValue
     @AppStorage(SettingsKey.smoothFocus) private var smoothFocus = true
     @AppStorage(SettingsKey.focusHighlighter) private var focusHighlighter = false
@@ -207,7 +209,7 @@ struct TVCatalogRow: View {
                     .font(.custom("Inter-Bold", size: 30))
                     .foregroundColor(.white)
 
-                if catalogAddonNames, let addonName = addonName, !addonName.isEmpty {
+                if showCatalogAddonNames, let addonName = addonName, !addonName.isEmpty {
                     Text(addonName)
                         .font(.custom("Inter-SemiBold", size: 16))
                         .foregroundColor(SettingsAccent.color(for: theme))
@@ -404,6 +406,7 @@ extension TVCatalogRow: Equatable {
         return lhs.id == rhs.id
             && lhs.title == rhs.title
             && lhs.addonName == rhs.addonName
+            && lhs.showCatalogAddonNames == rhs.showCatalogAddonNames
             && lhs.horizontalEdgeInset == rhs.horizontalEdgeInset
             && lhs.items == rhs.items
             && lhs.watchedTitleKeys == rhs.watchedTitleKeys
@@ -450,6 +453,8 @@ enum TVHomeGridLayout {
 struct TVHomeCatalogGridSection: View {
     let section: TVHomeSection
     let watchedTitleKeys: Set<String>
+    /// Passed from Home so toggling the setting redraws while Home stays mounted.
+    var showCatalogAddonNames: Bool = true
     let initialFocusCardKey: String?
     var externalFocus: FocusState<String?>.Binding? = nil
     var restrictFocusToCardKey: String? = nil
@@ -461,7 +466,6 @@ struct TVHomeCatalogGridSection: View {
     let onSeeAllFocus: () -> Void
     let onSeeAll: () -> Void
 
-    @AppStorage(SettingsKey.catalogAddonNames) private var catalogAddonNames = true
     @AppStorage(SettingsKey.theme) private var theme = SettingsAccent.white.rawValue
 
     private var previewItems: [NuvioMeta] {
@@ -479,7 +483,7 @@ struct TVHomeCatalogGridSection: View {
                     .font(.custom("Inter-Bold", size: 30))
                     .foregroundColor(.white)
 
-                if catalogAddonNames, let addonName = section.addonName, !addonName.isEmpty {
+                if showCatalogAddonNames, let addonName = section.addonName, !addonName.isEmpty {
                     Text(addonName)
                         .font(.custom("Inter-SemiBold", size: 16))
                         .foregroundColor(SettingsAccent.color(for: theme))
