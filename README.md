@@ -1,3 +1,9 @@
+> **Development fork.** This repository is MagiqueDeveloper's working copy for changes destined for [`bobsupra/NuvioTVOS`](https://github.com/bobsupra/NuvioTVOS). It is not the canonical app, release channel, or issue tracker.
+>
+> - **Upstream (releases, issues, PRs):** https://github.com/bobsupra/NuvioTVOS  
+> - **This fork (WIP branches / experiments):** https://github.com/MagiqueDeveloper/NuvioTVOS  
+> - Open bugs and feature requests on the [upstream issue tracker](https://github.com/bobsupra/NuvioTVOS/issues). Download official builds from [upstream Releases](https://github.com/bobsupra/NuvioTVOS/releases).
+
 <div align="center">
 
   <img src="https://github.com/tapframe/NuvioTV/blob/main/assets/brand/app_logo_wordmark.png" alt="Nuvio" width="300" />
@@ -96,7 +102,9 @@ Simkl's PIN flow does not need a Client Secret. The Client ID stays on that Appl
 
 ## About
 
-This repository is the **tvOS-only** Nuvio Apple TV app: a native SwiftUI client under [tvosApp](./tvosApp) with Apple TV navigation, focus handling, profile selection, catalog browsing, details screens, search, library/watchlist surfaces, and playback controls designed for the Siri Remote.
+This tree is a **development fork** of [bobsupra/NuvioTVOS](https://github.com/bobsupra/NuvioTVOS). Product direction, official releases, and community issues live upstream. Use this repo for WIP branches, review builds, and preparing pull requests back to upstream.
+
+The app itself is **tvOS-only**: a native SwiftUI Apple TV client under [tvosApp](./tvosApp) with Apple TV navigation, focus handling, profile selection, catalog browsing, details screens, search, library/watchlist surfaces, and playback controls designed for the Siri Remote.
 
 The active development surface is [tvosApp/NuvioTV](./tvosApp/NuvioTV). Android / Kotlin Multiplatform and iOS phone targets are not part of this repository.
 
@@ -134,7 +142,14 @@ The Xcode project targets Apple TV (`SDKROOT = appletvos`) with bundle id `com.n
 ## Setup
 
 ```bash
-git clone --recurse-submodules <your-fork-url> NuvioTVOS
+git clone --recurse-submodules https://github.com/MagiqueDeveloper/NuvioTVOS.git
+cd NuvioTVOS
+```
+
+For the canonical upstream tree instead:
+
+```bash
+git clone --recurse-submodules https://github.com/bobsupra/NuvioTVOS.git
 cd NuvioTVOS
 ```
 
