@@ -55,6 +55,7 @@
 		AE10B009 /* NuvioTV/Sources/Core/Player/MPVPlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE10F009 /* NuvioTV/Sources/Core/Player/MPVPlaybackController.swift */; };
 		AE10B00A /* NuvioTV/Sources/UI/Player/PlayerSubtitleOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE10F00A /* NuvioTV/Sources/UI/Player/PlayerSubtitleOverlay.swift */; };
 		AE10B00B /* PlaybackBackendPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE10F00B /* PlaybackBackendPolicyTests.swift */; };
+		AE10B062 /* PlaybackIdlePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE10F062 /* PlaybackIdlePolicyTests.swift */; };
 		AE10B01A /* CatalogArtworkMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE10F01A /* CatalogArtworkMergeTests.swift */; };
 		AE10B00C /* NuvioTV/Sources/Core/Player/AISubtitleTranslationCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE10F00C /* NuvioTV/Sources/Core/Player/AISubtitleTranslationCache.swift */; };
 		AE10B00E /* NuvioTV/Sources/Core/Player/AppleTVCapability.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE10F00E /* NuvioTV/Sources/Core/Player/AppleTVCapability.swift */; };
@@ -233,6 +234,7 @@
 		AE10F009 /* NuvioTV/Sources/Core/Player/MPVPlaybackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuvioTV/Sources/Core/Player/MPVPlaybackController.swift; sourceTree = "<group>"; };
 		AE10F00A /* NuvioTV/Sources/UI/Player/PlayerSubtitleOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuvioTV/Sources/UI/Player/PlayerSubtitleOverlay.swift; sourceTree = "<group>"; };
 		AE10F00B /* PlaybackBackendPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackBackendPolicyTests.swift; sourceTree = "<group>"; };
+		AE10F062 /* PlaybackIdlePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackIdlePolicyTests.swift; sourceTree = "<group>"; };
 		AE10F01A /* CatalogArtworkMergeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogArtworkMergeTests.swift; sourceTree = "<group>"; };
 		AE10F00C /* NuvioTV/Sources/Core/Player/AISubtitleTranslationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuvioTV/Sources/Core/Player/AISubtitleTranslationCache.swift; sourceTree = "<group>"; };
 		AE10F00E /* NuvioTV/Sources/Core/Player/AppleTVCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuvioTV/Sources/Core/Player/AppleTVCapability.swift; sourceTree = "<group>"; };
@@ -589,6 +591,7 @@
 			isa = PBXGroup;
 			children = (
 				AE10F00B /* PlaybackBackendPolicyTests.swift */,
+				AE10F062 /* PlaybackIdlePolicyTests.swift */,
 				AE10F01A /* CatalogArtworkMergeTests.swift */,
 				AE10F00F /* AppleTVCapabilityTests.swift */,
 				AE10F011 /* PictureInPictureTests.swift */,
@@ -794,6 +797,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AE10B00B /* PlaybackBackendPolicyTests.swift in Sources */,
+				AE10B062 /* PlaybackIdlePolicyTests.swift in Sources */,
 				AE10B01A /* CatalogArtworkMergeTests.swift in Sources */,
 				AE10B00F /* AppleTVCapabilityTests.swift in Sources */,
 				AE10B011 /* PictureInPictureTests.swift in Sources */,

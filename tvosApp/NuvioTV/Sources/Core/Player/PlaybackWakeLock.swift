@@ -24,25 +24,50 @@ enum PlaybackAudioSession {
     }
 }
 
-/// Keeps Apple TV awake for the full player session.
+/// Whether the player session should block Apple TV screensaver / Sleep After.
 ///
-/// Custom MPV Metal rendering is not treated as "system video playback" the way
-/// a system video controller is, so tvOS can still honor Settings → General →
-/// Sleep After (often 15–30 minutes) unless the app explicitly disables the
-/// idle timer. Status-based toggling was too fragile: brief non-playing states
-/// re-enabled sleep while video continued.
+/// Custom MPV Metal rendering is not treated as system video playback, so tvOS
+/// honors Settings → General → Sleep After unless the idle timer is disabled.
+/// Hold the lock while video is loading or playing; drop it on pause, end, and
+/// error so screensaver and sleep can run. Source switches keep the lock even
+/// if status flickers, because those gaps are not user-idle.
+enum PlaybackIdlePolicy {
+    static func preventsIdle(
+        status: PlayerStatus,
+        isSwitchingSource: Bool = false,
+        isReloadingStream: Bool = false
+    ) -> Bool {
+        if isSwitchingSource || isReloadingStream {
+            return true
+        }
+        switch status {
+        case .playing, .buffering, .idle:
+            return true
+        case .paused, .ended, .error:
+            return false
+        }
+    }
+}
+
+/// Keeps Apple TV awake while playback is actually in progress.
 ///
-/// Hold this for the entire `PlayerView` lifetime (including pause/buffering),
-/// and reassert periodically in case the system or another UI path clears it.
+/// Acquire for the `PlayerView` lifetime (including Picture in Picture), then
+/// call `setPreventsIdle` as status changes so a paused session can sleep.
+/// Reassert periodically in case the system or another UI path clears the flag
+/// while video is still playing.
 @MainActor
 enum PlaybackWakeLock {
     private static var holdCount = 0
+    private static var preventsIdle = true
     private static var reassertTimer: Timer?
 
-    /// Begin preventing sleep. Nested acquires are reference-counted.
+    /// Begin a player-session hold. Nested acquires are reference-counted.
     static func acquire() {
         holdCount += 1
-        apply(disabled: true)
+        if holdCount == 1 {
+            preventsIdle = true
+        }
+        apply()
         activateAudioSession()
         startReassertTimerIfNeeded()
     }
@@ -53,17 +78,26 @@ enum PlaybackWakeLock {
         if holdCount == 0 {
             reassertTimer?.invalidate()
             reassertTimer = nil
-            apply(disabled: false)
+            preventsIdle = true
+            apply()
         }
     }
 
-    /// Force the idle timer off while a hold is active (safe to call often).
-    static func reassert() {
+    /// Update whether the current hold should block screensaver / sleep.
+    static func setPreventsIdle(_ value: Bool) {
+        preventsIdle = value
         guard holdCount > 0 else { return }
-        apply(disabled: true)
+        apply()
     }
 
-    private static func apply(disabled: Bool) {
+    /// Re-apply the current idle policy while a hold is active (safe to call often).
+    static func reassert() {
+        guard holdCount > 0 else { return }
+        apply()
+    }
+
+    private static func apply() {
+        let disabled = holdCount > 0 && preventsIdle
         if UIApplication.shared.isIdleTimerDisabled != disabled {
             UIApplication.shared.isIdleTimerDisabled = disabled
         }
