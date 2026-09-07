@@ -1,13 +1,15 @@
 # Contributing
 
-Thanks for helping improve Nuvio. Please keep contributions focused and aligned with the current product direction.
+Thanks for helping improve Nuvio on Apple TV.
+
+**This repository is a development fork** of [`bobsupra/NuvioTVOS`](https://github.com/bobsupra/NuvioTVOS). Prefer opening issues and pull requests against upstream unless you are collaborating on a WIP branch here. Keep contributions focused and aligned with upstream product direction.
 
 ## Before you start
 
 - Bug fixes, regressions, stability improvements, translations, and documentation fixes are welcome.
-- New features, UX changes, architecture changes, dependency changes, and large refactors require an approved feature request before implementation.
+- New features, UX changes, architecture changes, dependency changes, and large refactors require an approved feature request on [upstream](https://github.com/bobsupra/NuvioTVOS/issues) before implementation.
 - Cosmetic-only UI changes are not accepted.
-- Open one issue per problem and link the issue in your pull request.
+- Open one issue per problem (on upstream) and link that issue in your pull request.
 
 ## UI and behavior changes
 
@@ -38,13 +40,13 @@ Describe the problem, use case, proposed solution, and alternatives. Wait for ex
 - Catalog, source, Cloud Library, and Top Shelf integrations benefit from real-account/device testing.
 - The main known issue is occasional horizontal scrolling stutter while artwork loads.
 - If login returns to the Apple TV Home screen, attach a device console or crash log.
-- The optional `NuvioTVandroid/` reference checkout is not required.
+- The optional Android reference checkout is not part of this repository.
 
 ## Pull request checklist
 
-Before opening a PR, confirm that it:
+Target [`bobsupra/NuvioTVOS`](https://github.com/bobsupra/NuvioTVOS) for review when the work is ready. Before opening a PR, confirm that it:
 
-- Fixes a linked issue or has explicit feature approval
+- Fixes a linked upstream issue or has explicit feature approval
 - Is focused and minimal
 - Includes appropriate tests or manual verification
 - Includes visual proof for UI fixes

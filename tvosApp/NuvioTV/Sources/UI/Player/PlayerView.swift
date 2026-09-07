@@ -417,9 +417,10 @@ struct PlayerView: View {
         .animation(.easeOut(duration: 0.22), value: viewModel.showPauseOverlay)
         .animation(.easeOut(duration: 0.22), value: viewModel.sidePanel)
         .onAppear {
-            // Hold for the full player session (not only .playing/.buffering).
-            // Status flicker previously re-enabled Sleep After mid-watch.
+            // Hold for the player session, then sync so pause/end can sleep
+            // without dropping the lock during buffering or source switches.
             PlaybackWakeLock.acquire()
+            syncPlaybackWakeLock()
             viewModel.load(
                 url: url,
                 meta: meta,
@@ -465,9 +466,7 @@ struct PlayerView: View {
             }
         }
         .onChange(of: viewModel.status) { _, status in
-            // Keep reasserting while the player is up — never re-enable sleep
-            // based on transient status (pause/buffer/error) mid-session.
-            PlaybackWakeLock.reassert()
+            syncPlaybackWakeLock()
             if status == .playing,
                !viewModel.isSwitchingSource,
                !viewModel.isReloadingStream,
@@ -487,10 +486,14 @@ struct PlayerView: View {
             onFinished()
         }
         .onChange(of: viewModel.isSwitchingSource) { _, isSwitching in
+            syncPlaybackWakeLock()
             if isSwitching {
                 PlaybackStartupTiming.start()
                 didReportPlaybackStarted = false
             }
+        }
+        .onChange(of: viewModel.isReloadingStream) { _, _ in
+            syncPlaybackWakeLock()
         }
         .onChange(of: viewModel.didDetectReplacementStream) { _, isReplacement in
             if isReplacement {
@@ -692,6 +695,16 @@ struct PlayerView: View {
             return "\(meta.id):\(numbers.season):\(numbers.episode)"
         }
         return meta.id
+    }
+
+    private func syncPlaybackWakeLock() {
+        PlaybackWakeLock.setPreventsIdle(
+            PlaybackIdlePolicy.preventsIdle(
+                status: viewModel.status,
+                isSwitchingSource: viewModel.isSwitchingSource,
+                isReloadingStream: viewModel.isReloadingStream
+            )
+        )
     }
 
     private func focusRemoteInput() {
