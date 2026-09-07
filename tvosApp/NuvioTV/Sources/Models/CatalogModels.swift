@@ -700,6 +700,25 @@ struct NuvioSubtitle: Identifiable, Codable, Equatable {
     /// Where the subtitle came from ("OpenSubtitles v3", stream add-on name);
     /// shown as the badge in the player's subtitle picker.
     var source: String? = nil
+    /// Local file URL engines should load. Kept separate from `url` so the
+    /// player Settings list can keep matching the original add-on identity.
+    var playbackURL: String? = nil
+    /// File-extension hint for extensionless Stremio download URLs ("srt", …).
+    var formatHint: String? = nil
+
+    /// URL handed to MPV / Aether for decoding.
+    var engineURL: String { playbackURL ?? url }
+
+    private enum CodingKeys: String, CodingKey {
+        case url, language, label, source
+    }
+
+    static func == (lhs: NuvioSubtitle, rhs: NuvioSubtitle) -> Bool {
+        lhs.url == rhs.url
+            && lhs.language == rhs.language
+            && lhs.label == rhs.label
+            && lhs.source == rhs.source
+    }
 }
 
 struct NuvioStream: Identifiable, Codable {

@@ -1133,7 +1133,7 @@ final class MPVPlayerViewController: UIViewController, PlaybackEngineControlling
     func addSubtitle(_ subtitle: NuvioSubtitle, select: Bool) {
         guard mpv != nil else { return }
         command("sub-add", args: [
-            subtitle.url,
+            subtitle.engineURL,
             select ? "select" : "auto",
             subtitle.label ?? "",
             subtitle.language

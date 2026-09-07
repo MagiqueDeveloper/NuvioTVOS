@@ -232,6 +232,9 @@ class PlayerViewModel: ObservableObject {
     private var pendingExternalSubtitles: [NuvioSubtitle] = []
     private var didAddExternalSubtitles = false
     private var addedExternalSubtitleURLs: Set<String> = []
+    /// Maps an engine-local path (`file:///…` or absolute path) back to the
+    /// original add-on subtitle URL so the Settings panel can keep matching.
+    private var externalSubtitleIdentityByEngineURL: [String: String] = [:]
     private var pendingSelectedExternalSubtitleURL: String?
     private var subtitleFetchTask: Task<Void, Never>?
     private var activeTrackSelectionKey: String?
@@ -586,7 +589,10 @@ class PlayerViewModel: ObservableObject {
             audioURL: nil,
             resumePositionSeconds: pendingResumeSeconds,
             httpHeaders: httpHeaders,
-            externalSubtitles: pendingExternalSubtitles,
+            // Remote add-on sidecars are downloaded then `sub-add`ed after the
+            // engine is ready. Passing them here would attach stream auth headers
+            // (MPV http-header-fields / Aether LoadOptions) and break OpenSubtitles.
+            externalSubtitles: [],
             preferredAudioLanguages: preferredAudioLanguageCodes(),
             preferredSubtitleLanguages: preferredSubtitleLanguageCodes(),
             matchContentEnabled: matchContent,
@@ -609,12 +615,12 @@ class PlayerViewModel: ObservableObject {
             request,
             requiresMPVAudioControls: audioDelayMs != 0 || audioAmplificationDb > 0
         )
-        // The coordinator owns initial seek and subtitle registration on both
-        // backends; later progressive subtitle results still flow through the
-        // incremental path below.
+        // The coordinator owns initial seek on both backends; external add-on
+        // subtitles are prepared and attached through the incremental path below.
         didApplyResume = (request.resumePositionSeconds ?? 0) > 5
-        didAddExternalSubtitles = true
-        addedExternalSubtitleURLs.formUnion(request.externalSubtitles.map(\.url))
+        didAddExternalSubtitles = pendingExternalSubtitles.isEmpty
+        addedExternalSubtitleURLs = []
+        externalSubtitleIdentityByEngineURL = [:]
         activeEngineKind = sessionCoordinator.activeBackend
         hdrModeToast = sessionCoordinator.statusToast
         if let toast = sessionCoordinator.statusToast {
@@ -750,6 +756,7 @@ class PlayerViewModel: ObservableObject {
         )
         self.didAddExternalSubtitles = pendingExternalSubtitles.isEmpty
         self.addedExternalSubtitleURLs = []
+        self.externalSubtitleIdentityByEngineURL = [:]
         self.pendingSelectedExternalSubtitleURL = nil
         self.isAISubtitleTranslationManuallyEnabled = false
         if !preserveSessionPreferences {
@@ -1779,10 +1786,14 @@ class PlayerViewModel: ObservableObject {
         if audioTracks != latestAudioTracks { audioTracks = latestAudioTracks }
 
         var subs = c.subtitleTracks.map {
-            SubtitleTrack(id: "\($0.id)", name: $0.title,
-                          language: $0.lang, isSelected: $0.selected,
-                          externalFilename: $0.externalFilename,
-                          isNativelyRenderedSubtitle: $0.isNativelyRenderedSubtitle)
+            SubtitleTrack(
+                id: "\($0.id)",
+                name: $0.title,
+                language: $0.lang,
+                isSelected: $0.selected,
+                externalFilename: identityURL(forEngineFilename: $0.externalFilename),
+                isNativelyRenderedSubtitle: $0.isNativelyRenderedSubtitle
+            )
         }
         let anySelected = subs.contains { $0.isSelected }
         subs.insert(SubtitleTrack(id: "off", name: "Off", language: "",
@@ -2637,14 +2648,46 @@ class PlayerViewModel: ObservableObject {
             let selected = subtitlesToAdd.remove(at: index)
             subtitlesToAdd.append(selected)
         }
-        subtitlesToAdd.forEach { subtitle in
-            engine.addSubtitle(
-                subtitle,
-                select: subtitle.url == pendingSelectedExternalSubtitleURL
-            )
-            addedExternalSubtitleURLs.insert(subtitle.url)
+        guard !subtitlesToAdd.isEmpty else {
+            didAddExternalSubtitles = true
+            return
         }
+        // Mark in-flight so poll ticks do not start a second download wave.
         didAddExternalSubtitles = true
+        let selectedURL = pendingSelectedExternalSubtitleURL
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for subtitle in subtitlesToAdd {
+                let prepared = await ExternalSubtitleFileCache.shared.prepare(subtitle)
+                self.rememberEngineIdentity(for: prepared)
+                self.engine.addSubtitle(
+                    prepared,
+                    select: prepared.url == selectedURL
+                )
+                self.addedExternalSubtitleURLs.insert(prepared.url)
+            }
+        }
+    }
+
+    private func rememberEngineIdentity(for subtitle: NuvioSubtitle) {
+        guard let playbackURL = subtitle.playbackURL, !playbackURL.isEmpty else { return }
+        externalSubtitleIdentityByEngineURL[playbackURL] = subtitle.url
+        if let fileURL = URL(string: playbackURL), fileURL.isFileURL {
+            externalSubtitleIdentityByEngineURL[fileURL.path] = subtitle.url
+            externalSubtitleIdentityByEngineURL[fileURL.absoluteString] = subtitle.url
+        }
+    }
+
+    private func identityURL(forEngineFilename filename: String) -> String {
+        guard !filename.isEmpty else { return filename }
+        if let identity = externalSubtitleIdentityByEngineURL[filename] {
+            return identity
+        }
+        if let fileURL = URL(string: filename), fileURL.isFileURL,
+           let identity = externalSubtitleIdentityByEngineURL[fileURL.path] {
+            return identity
+        }
+        return filename
     }
 
     private func applySavedTrackSelectionsIfNeeded() {
