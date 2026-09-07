@@ -52,7 +52,328 @@ struct PlayerView: View {
     @FocusState private var postPlayFocus: PostPlayFocusItem?
 
     var body: some View {
+        // Intermediate `let`s force type-check boundaries under Xcode 26.
+        let animated = playerAttachAnimations(playerRoot)
+        let lived = playerAttachLifecycle(animated)
+        let statused = playerAttachStatusEffects(lived)
+        let chromed = playerAttachChromeEffects(statused)
+        return playerAttachRemoteCommands(chromed)
+    }
+
+    private func playerAttachAnimations<Content: View>(_ content: Content) -> some View {
+        content
+        .animation(.playerControls, value: viewModel.showSettingsPanel)
+        .animation(.playerControls, value: viewModel.showNextEpisodeCard)
+        .animation(.playerControls, value: viewModel.showSkipSegmentCard)
+        .animation(.easeOut(duration: 0.16), value: viewModel.isScrubbing)
+        .animation(.easeOut(duration: 0.16), value: viewModel.peekVisible)
+        .animation(.easeOut(duration: 0.16), value: viewModel.pendingSeekDelta != 0)
+        .animation(.easeOut(duration: 0.2), value: viewModel.isSwitchingSource)
+        .animation(.easeOut(duration: 0.2), value: viewModel.playerToast)
+        .animation(.easeOut(duration: 0.22), value: viewModel.showPauseOverlay)
+        .animation(.easeOut(duration: 0.22), value: viewModel.sidePanel)
+    }
+
+    private func playerAttachLifecycle<Content: View>(_ content: Content) -> some View {
+        content
+        .onAppear {
+            TVHomeDebugTrace.log("player.appear meta=\(meta.id)")
+            // Hold for the player session, then sync so pause/end can sleep
+            // without dropping the lock during buffering or source switches.
+            PlaybackWakeLock.acquire()
+            syncPlaybackWakeLock()
+            viewModel.load(
+                url: url,
+                meta: meta,
+                subtitle: subtitle,
+                httpHeaders: httpHeaders,
+                externalSubtitles: externalSubtitles,
+                resumeFrom: resumeFrom,
+                playbackOrigin: playbackOrigin,
+                addonName: addonName,
+                provider: provider,
+                filename: filename,
+                videoSize: videoSize
+            )
+            if subtitle != PlaybackMarkers.trailerSubtitle {
+                viewModel.fetchExternalSubtitles(
+                    contentId: subtitleContentId,
+                    type: meta.isSeries ? "series" : meta.type
+                )
+            }
+            viewModel.reloadCurrentStream = reloadCurrentStream
+            viewModel.fetchPlaybackSources = fetchPlaybackSources
+            viewModel.resolvePlaybackStream = resolvePlaybackStream
+            if let resolveNextStream {
+                viewModel.configureNextEpisode(
+                    episodes: episodes,
+                    current: currentEpisode,
+                    autoPlayEnabled: autoPlayNextEnabled,
+                    autoPlayCountdownSeconds: autoPlayNextCountdownSeconds,
+                    resolver: resolveNextStream
+                )
+            }
+        }
+        .onDisappear {
+            TVHomeDebugTrace.log("player.disappear meta=\(meta.id)")
+            PlaybackStartupTiming.cancel()
+            if !PictureInPictureManager.shared.isPictureInPictureActive {
+                PlaybackWakeLock.release()
+                viewModel.shutdown()
+            }
+        }
+        .onChange(of: viewModel.isPictureInPictureActive) { _, isActive in
+            if isActive {
+                onBack()
+            }
+        }
+    }
+
+    private func playerAttachStatusEffects<Content: View>(_ content: Content) -> some View {
+        content
+        .onChange(of: viewModel.status) { _, status in
+            syncPlaybackWakeLock()
+            if status == .playing,
+               !viewModel.isSwitchingSource,
+               !viewModel.isReloadingStream,
+               !viewModel.didDetectReplacementStream,
+               !didReportPlaybackStarted {
+                didReportPlaybackStarted = true
+                PlaybackStartupTiming.complete()
+                onPlaybackStarted?()
+            }
+            guard status == .ended,
+                  !didHandleFinished,
+                  !viewModel.postPlayState.blocksNaturalCompletion,
+                  let onFinished else {
+                return
+            }
+            didHandleFinished = true
+            onFinished()
+        }
+        .onChange(of: viewModel.isSwitchingSource) { _, isSwitching in
+            syncPlaybackWakeLock()
+            if isSwitching {
+                PlaybackStartupTiming.start()
+                didReportPlaybackStarted = false
+            }
+        }
+        .onChange(of: viewModel.isReloadingStream) { _, _ in
+            syncPlaybackWakeLock()
+        }
+        .onChange(of: viewModel.didDetectReplacementStream) { _, isReplacement in
+            if isReplacement {
+                PlaybackStartupTiming.start()
+                didReportPlaybackStarted = false
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                PlaybackWakeLock.reassert()
+            }
+        }
+    }
+
+    private func playerAttachChromeEffects<Content: View>(_ content: Content) -> some View {
+        content
+        .onChange(of: viewModel.showControls) { _, isVisible in
+            if viewModel.sidePanel != nil || viewModel.postPlayState.isVisible {
+                remoteInputFocused = false
+                nextEpisodeFocused = false
+                cancelAutoPlayFocused = false
+                skipSegmentFocused = false
+                return
+            }
+            if isVisible, !viewModel.isScrubbing, !viewModel.showPauseOverlay {
+                remoteInputFocused = false
+                nextEpisodeFocused = false
+                cancelAutoPlayFocused = false
+                skipSegmentFocused = false
+            } else if viewModel.isScrubbing || viewModel.showPauseOverlay {
+                focusRemoteInput()
+            } else if viewModel.showNextEpisodeCard {
+                focusNextEpisode()
+            } else if viewModel.showSkipSegmentCard {
+                focusSkipSegment()
+            } else {
+                focusRemoteInput()
+            }
+        }
+        .onChange(of: viewModel.postPlayState.isVisible) { _, isVisible in
+            if isVisible {
+                remoteInputFocused = false
+                nextEpisodeFocused = false
+                cancelAutoPlayFocused = false
+                skipSegmentFocused = false
+                DispatchQueue.main.async {
+                    postPlayFocus = .primaryAction
+                }
+            } else {
+                postPlayFocus = nil
+            }
+        }
+        .onChange(of: viewModel.sidePanel) { _, panel in
+            if panel != nil {
+                remoteInputFocused = false
+                nextEpisodeFocused = false
+                cancelAutoPlayFocused = false
+                skipSegmentFocused = false
+            }
+        }
+        .onChange(of: viewModel.showPauseOverlay) { _, visible in
+            if visible {
+                nextEpisodeFocused = false
+                cancelAutoPlayFocused = false
+                skipSegmentFocused = false
+                focusRemoteInput()
+            }
+        }
+        .onChange(of: viewModel.isScrubbing) { _, scrubbing in
+            if scrubbing {
+                nextEpisodeFocused = false
+                cancelAutoPlayFocused = false
+                skipSegmentFocused = false
+                focusRemoteInput()
+            } else if viewModel.showControls {
+                remoteInputFocused = false
+            } else {
+                focusRemoteInput()
+            }
+        }
+        .onChange(of: viewModel.showNextEpisodeCard) { _, visible in
+            guard !viewModel.showControls else { return }
+            if visible {
+                focusNextEpisode()
+            } else if viewModel.showSkipSegmentCard {
+                nextEpisodeFocused = false
+                cancelAutoPlayFocused = false
+                focusSkipSegment()
+            } else {
+                nextEpisodeFocused = false
+                cancelAutoPlayFocused = false
+                focusRemoteInput()
+            }
+        }
+        .onChange(of: viewModel.isAutoPlayCancelled) { _, cancelled in
+            if cancelled {
+                cancelAutoPlayFocused = false
+                focusNextEpisode()
+            }
+        }
+        .onChange(of: viewModel.showSkipSegmentCard) { _, visible in
+            guard !viewModel.showControls, !viewModel.showNextEpisodeCard else { return }
+            if visible {
+                focusSkipSegment()
+            } else {
+                skipSegmentFocused = false
+                focusRemoteInput()
+            }
+        }
+    }
+
+    private func playerAttachRemoteCommands<Content: View>(_ content: Content) -> some View {
+        content
+        .onPlayPauseCommand {
+            viewModel.togglePlayPause()
+        }
+        .onMoveCommand { direction in
+            // The Episodes/Sources sheet exclusively owns directional input.
+            // Do not let list navigation also seek or reveal player controls.
+            guard viewModel.sidePanel == nil else { return }
+
+            // Trackpad swipes also emit move commands; the pan recognizer sets
+            // moveSuppressed so a swipe does not double-fire as a skip.
+            if viewModel.moveSuppressed { return }
+
+            if viewModel.isScrubbing {
+                switch direction {
+                case .left:
+                    viewModel.scrubJump(-Double(max(viewModel.seekStepSeconds * 4, 60)))
+                case .right:
+                    viewModel.scrubJump(Double(max(viewModel.seekStepSeconds * 4, 60)))
+                default:
+                    viewModel.cancelScrub()
+                }
+                return
+            }
+
+            if viewModel.showPauseOverlay {
+                switch direction {
+                case .left:
+                    viewModel.nudgeSeek(-Double(viewModel.seekStepSeconds))
+                case .right:
+                    viewModel.nudgeSeek(Double(viewModel.seekStepSeconds))
+                default:
+                    viewModel.revealControls()
+                }
+                return
+            }
+
+            guard !viewModel.showControls else { return }
+            switch direction {
+            case .left:
+                viewModel.nudgeSeek(-Double(viewModel.seekStepSeconds))
+            case .right:
+                viewModel.nudgeSeek(Double(viewModel.seekStepSeconds))
+            default:
+                viewModel.revealControls()
+            }
+        }
+        .onExitCommand {
+            // The panel handles its own exit; this fallback covers the frame
+            // where focus hasn't landed inside it yet.
+            if viewModel.showSettingsPanel {
+                viewModel.showSettingsPanel = false
+                return
+            }
+            if viewModel.sidePanel != nil {
+                viewModel.closeSidePanel()
+                return
+            }
+            if viewModel.isScrubbing {
+                viewModel.cancelScrub()
+                return
+            }
+            if viewModel.showPauseOverlay {
+                viewModel.dismissPauseOverlay()
+                viewModel.revealControls()
+                return
+            }
+            if viewModel.peekVisible {
+                viewModel.hidePeek()
+                return
+            }
+            if viewModel.postPlayState.isTrailerPlaying {
+                viewModel.stopPostPlayTrailer()
+                return
+            }
+            if viewModel.postPlayState.isVisible {
+                if viewModel.postPlayState.canReturnToPlayer && viewModel.time.current < max(0, viewModel.time.duration - 3) && viewModel.status != .ended {
+                    viewModel.returnToPlayerFromPostPlay()
+                } else {
+                    onBack()
+                }
+                return
+            }
+            if viewModel.showControls {
+                viewModel.hideControls()
+                return
+            }
+            onBack()
+        }
+    }
+
+    /// Split out of `body` so the Swift type-checker can finish under Xcode 26.
+    @ViewBuilder
+    private var playerRoot: some View {
         ZStack {
+            playerPrimaryLayers
+            playerChromeLayers
+        }
+    }
+
+    @ViewBuilder
+    private var playerPrimaryLayers: some View {
             Color.black.ignoresSafeArea()
 
             // Main video surface (or top-right mini window during post-play recommendations)
@@ -254,6 +575,10 @@ struct PlayerView: View {
                 }
                 .accessibilityHidden(true)
 
+    }
+
+    @ViewBuilder
+    private var playerChromeLayers: some View {
             // Light-tap peek timeline (no full chrome).
             if viewModel.peekVisible, !viewModel.showControls, !viewModel.isScrubbing {
                 PeekBar(clock: viewModel.clock)
@@ -405,290 +730,6 @@ struct PlayerView: View {
             }
 
             debugOverlayLayer
-        }
-        .animation(.playerControls, value: viewModel.showSettingsPanel)
-        .animation(.playerControls, value: viewModel.showNextEpisodeCard)
-        .animation(.playerControls, value: viewModel.showSkipSegmentCard)
-        .animation(.easeOut(duration: 0.16), value: viewModel.isScrubbing)
-        .animation(.easeOut(duration: 0.16), value: viewModel.peekVisible)
-        .animation(.easeOut(duration: 0.16), value: viewModel.pendingSeekDelta != 0)
-        .animation(.easeOut(duration: 0.2), value: viewModel.isSwitchingSource)
-        .animation(.easeOut(duration: 0.2), value: viewModel.playerToast)
-        .animation(.easeOut(duration: 0.22), value: viewModel.showPauseOverlay)
-        .animation(.easeOut(duration: 0.22), value: viewModel.sidePanel)
-        .onAppear {
-            TVHomeDebugTrace.log("player.appear meta=\(meta.id)")
-            // Hold for the player session, then sync so pause/end can sleep
-            // without dropping the lock during buffering or source switches.
-            PlaybackWakeLock.acquire()
-            syncPlaybackWakeLock()
-            viewModel.load(
-                url: url,
-                meta: meta,
-                subtitle: subtitle,
-                httpHeaders: httpHeaders,
-                externalSubtitles: externalSubtitles,
-                resumeFrom: resumeFrom,
-                playbackOrigin: playbackOrigin,
-                addonName: addonName,
-                provider: provider,
-                filename: filename,
-                videoSize: videoSize
-            )
-            if subtitle != PlaybackMarkers.trailerSubtitle {
-                viewModel.fetchExternalSubtitles(
-                    contentId: subtitleContentId,
-                    type: meta.isSeries ? "series" : meta.type
-                )
-            }
-            viewModel.reloadCurrentStream = reloadCurrentStream
-            viewModel.fetchPlaybackSources = fetchPlaybackSources
-            viewModel.resolvePlaybackStream = resolvePlaybackStream
-            if let resolveNextStream {
-                viewModel.configureNextEpisode(
-                    episodes: episodes,
-                    current: currentEpisode,
-                    autoPlayEnabled: autoPlayNextEnabled,
-                    autoPlayCountdownSeconds: autoPlayNextCountdownSeconds,
-                    resolver: resolveNextStream
-                )
-            }
-        }
-        .onDisappear {
-            TVHomeDebugTrace.log("player.disappear meta=\(meta.id)")
-            PlaybackStartupTiming.cancel()
-            if !PictureInPictureManager.shared.isPictureInPictureActive {
-                PlaybackWakeLock.release()
-                viewModel.shutdown()
-            }
-        }
-        .onChange(of: viewModel.isPictureInPictureActive) { _, isActive in
-            if isActive {
-                onBack()
-            }
-        }
-        .onChange(of: viewModel.status) { _, status in
-            syncPlaybackWakeLock()
-            if status == .playing,
-               !viewModel.isSwitchingSource,
-               !viewModel.isReloadingStream,
-               !viewModel.didDetectReplacementStream,
-               !didReportPlaybackStarted {
-                didReportPlaybackStarted = true
-                PlaybackStartupTiming.complete()
-                onPlaybackStarted?()
-            }
-            guard status == .ended,
-                  !didHandleFinished,
-                  !viewModel.postPlayState.blocksNaturalCompletion,
-                  let onFinished else {
-                return
-            }
-            didHandleFinished = true
-            onFinished()
-        }
-        .onChange(of: viewModel.isSwitchingSource) { _, isSwitching in
-            syncPlaybackWakeLock()
-            if isSwitching {
-                PlaybackStartupTiming.start()
-                didReportPlaybackStarted = false
-            }
-        }
-        .onChange(of: viewModel.isReloadingStream) { _, _ in
-            syncPlaybackWakeLock()
-        }
-        .onChange(of: viewModel.didDetectReplacementStream) { _, isReplacement in
-            if isReplacement {
-                PlaybackStartupTiming.start()
-                didReportPlaybackStarted = false
-            }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                syncPlaybackWakeLock()
-            }
-        }
-        .onChange(of: viewModel.showControls) { _, isVisible in
-            if viewModel.sidePanel != nil || viewModel.postPlayState.isVisible {
-                remoteInputFocused = false
-                nextEpisodeFocused = false
-                cancelAutoPlayFocused = false
-                skipSegmentFocused = false
-                return
-            }
-            if isVisible, !viewModel.isScrubbing, !viewModel.showPauseOverlay {
-                remoteInputFocused = false
-                nextEpisodeFocused = false
-                cancelAutoPlayFocused = false
-                skipSegmentFocused = false
-            } else if viewModel.isScrubbing || viewModel.showPauseOverlay {
-                focusRemoteInput()
-            } else if viewModel.showNextEpisodeCard {
-                focusNextEpisode()
-            } else if viewModel.showSkipSegmentCard {
-                focusSkipSegment()
-            } else {
-                focusRemoteInput()
-            }
-        }
-        .onChange(of: viewModel.postPlayState.isVisible) { _, isVisible in
-            if isVisible {
-                remoteInputFocused = false
-                nextEpisodeFocused = false
-                cancelAutoPlayFocused = false
-                skipSegmentFocused = false
-                DispatchQueue.main.async {
-                    postPlayFocus = .primaryAction
-                }
-            } else {
-                postPlayFocus = nil
-            }
-        }
-        .onChange(of: viewModel.sidePanel) { _, panel in
-            if panel != nil {
-                remoteInputFocused = false
-                nextEpisodeFocused = false
-                cancelAutoPlayFocused = false
-                skipSegmentFocused = false
-            }
-        }
-        .onChange(of: viewModel.showPauseOverlay) { _, visible in
-            if visible {
-                nextEpisodeFocused = false
-                cancelAutoPlayFocused = false
-                skipSegmentFocused = false
-                focusRemoteInput()
-            }
-        }
-        .onChange(of: viewModel.isScrubbing) { _, scrubbing in
-            if scrubbing {
-                nextEpisodeFocused = false
-                cancelAutoPlayFocused = false
-                skipSegmentFocused = false
-                focusRemoteInput()
-            } else if viewModel.showControls {
-                remoteInputFocused = false
-            } else {
-                focusRemoteInput()
-            }
-        }
-        .onChange(of: viewModel.showNextEpisodeCard) { _, visible in
-            guard !viewModel.showControls else { return }
-            if visible {
-                focusNextEpisode()
-            } else if viewModel.showSkipSegmentCard {
-                nextEpisodeFocused = false
-                cancelAutoPlayFocused = false
-                focusSkipSegment()
-            } else {
-                nextEpisodeFocused = false
-                cancelAutoPlayFocused = false
-                focusRemoteInput()
-            }
-        }
-        .onChange(of: viewModel.isAutoPlayCancelled) { _, cancelled in
-            if cancelled {
-                cancelAutoPlayFocused = false
-                focusNextEpisode()
-            }
-        }
-        .onChange(of: viewModel.showSkipSegmentCard) { _, visible in
-            guard !viewModel.showControls, !viewModel.showNextEpisodeCard else { return }
-            if visible {
-                focusSkipSegment()
-            } else {
-                skipSegmentFocused = false
-                focusRemoteInput()
-            }
-        }
-        .onPlayPauseCommand {
-            viewModel.togglePlayPause()
-        }
-        .onMoveCommand { direction in
-            // The Episodes/Sources sheet exclusively owns directional input.
-            // Do not let list navigation also seek or reveal player controls.
-            guard viewModel.sidePanel == nil else { return }
-
-            // Trackpad swipes also emit move commands; the pan recognizer sets
-            // moveSuppressed so a swipe does not double-fire as a skip.
-            if viewModel.moveSuppressed { return }
-
-            if viewModel.isScrubbing {
-                switch direction {
-                case .left:
-                    viewModel.scrubJump(-Double(max(viewModel.seekStepSeconds * 4, 60)))
-                case .right:
-                    viewModel.scrubJump(Double(max(viewModel.seekStepSeconds * 4, 60)))
-                default:
-                    viewModel.cancelScrub()
-                }
-                return
-            }
-
-            if viewModel.showPauseOverlay {
-                switch direction {
-                case .left:
-                    viewModel.nudgeSeek(-Double(viewModel.seekStepSeconds))
-                case .right:
-                    viewModel.nudgeSeek(Double(viewModel.seekStepSeconds))
-                default:
-                    viewModel.revealControls()
-                }
-                return
-            }
-
-            guard !viewModel.showControls else { return }
-            switch direction {
-            case .left:
-                viewModel.nudgeSeek(-Double(viewModel.seekStepSeconds))
-            case .right:
-                viewModel.nudgeSeek(Double(viewModel.seekStepSeconds))
-            default:
-                viewModel.revealControls()
-            }
-        }
-        .onExitCommand {
-            // The panel handles its own exit; this fallback covers the frame
-            // where focus hasn't landed inside it yet.
-            if viewModel.showSettingsPanel {
-                viewModel.showSettingsPanel = false
-                return
-            }
-            if viewModel.sidePanel != nil {
-                viewModel.closeSidePanel()
-                return
-            }
-            if viewModel.isScrubbing {
-                viewModel.cancelScrub()
-                return
-            }
-            if viewModel.showPauseOverlay {
-                viewModel.dismissPauseOverlay()
-                viewModel.revealControls()
-                return
-            }
-            if viewModel.peekVisible {
-                viewModel.hidePeek()
-                return
-            }
-            if viewModel.postPlayState.isTrailerPlaying {
-                viewModel.stopPostPlayTrailer()
-                return
-            }
-            if viewModel.postPlayState.isVisible {
-                if viewModel.postPlayState.canReturnToPlayer && viewModel.time.current < max(0, viewModel.time.duration - 3) && viewModel.status != .ended {
-                    viewModel.returnToPlayerFromPostPlay()
-                } else {
-                    onBack()
-                }
-                return
-            }
-            if viewModel.showControls {
-                viewModel.hideControls()
-                return
-            }
-            onBack()
-        }
     }
 
     private var subtitleContentId: String {
