@@ -18,7 +18,7 @@ The file-backed layer is a migration bridge, not the final persistence model. It
 | Stream links, binge groups, and continue-watching enrichment | SQLite cache tables with expiry and bounded retention |
 | Important user data | Backend remains authoritative and can restore purged local state |
 
-SQLDelight is preferred for the Apple client because its native driver supports Kotlin/Native and tvOS. Database work must run off the main thread and repositories should update individual rows rather than serializing entire datasets.
+SQLDelight (or another SQLite stack with a native Apple driver) is preferred for the Apple TV client. Database work must run off the main thread and repositories should update individual rows rather than serializing entire datasets.
 
 ### Migration sequence
 

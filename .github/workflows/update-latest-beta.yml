@@ -37,8 +37,17 @@ jobs:
 
           tag="$RELEASE_TAG"
           if [ -z "$tag" ]; then
-            tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq '[.[] | select(.draft == false)] | first | .tag_name')"
+            tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq '[.[] | select(.draft == false and .prerelease == false)] | first | .tag_name')"
           fi
+
+          case "$tag" in
+            tvos-beta-*|v[0-9]*)
+              ;;
+            *)
+              echo "Skipping README update for non-app release tag: $tag"
+              exit 0
+              ;;
+          esac
 
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > /tmp/release.json
 
@@ -92,7 +101,7 @@ jobs:
           else
             tag="$RELEASE_TAG"
             if [ -z "$tag" ]; then
-              tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq '[.[] | select(.draft == false)] | first | .tag_name')"
+              tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq '[.[] | select(.draft == false and .prerelease == false)] | first | .tag_name')"
             fi
             release_tags="$tag"
           fi

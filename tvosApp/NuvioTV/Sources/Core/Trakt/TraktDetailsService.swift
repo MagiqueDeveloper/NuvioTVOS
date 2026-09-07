@@ -215,6 +215,20 @@ private struct TraktIdsDTO: Decodable {
     let imdb: String?
     let slug: String?
     let tmdb: Int?
+
+    /// Prefer IMDb (`tt…`), then TMDB, then Trakt slug.
+    var relatedContentID: String? {
+        if let imdb, imdb.hasPrefix("tt") {
+            return imdb
+        }
+        if let tmdb {
+            return "tmdb:\(tmdb)"
+        }
+        if let slug, !slug.isEmpty {
+            return "trakt:\(slug)"
+        }
+        return nil
+    }
 }
 
 private struct TraktRelatedMovieDTO: Decodable {
@@ -227,15 +241,13 @@ private struct TraktRelatedMovieDTO: Decodable {
     func toRelatedTitle() -> RelatedTitle? {
         let name = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !name.isEmpty else { return nil }
-        let id = ids?.imdb.flatMap { $0.hasPrefix("tt") ? $0 : nil }
-            ?? ids?.tmdb.map { "tmdb:\($0)" }
-            ?? ids?.slug.map { "trakt:\($0)" }
-        guard let id else { return nil }
+        guard let id = ids?.relatedContentID else { return nil }
+        let poster = images?.poster?.first ?? images?.fanart?.first
         return RelatedTitle(
             id: id,
             type: "movie",
             name: name,
-            posterURL: (images?.poster?.first ?? images?.fanart?.first)?.normalizedTraktImageURL,
+            posterURL: poster?.normalizedTraktImageURL,
             year: year.map(String.init),
             rating: nil,
             overview: overview
@@ -253,15 +265,13 @@ private struct TraktRelatedShowDTO: Decodable {
     func toRelatedTitle() -> RelatedTitle? {
         let name = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !name.isEmpty else { return nil }
-        let id = ids?.imdb.flatMap { $0.hasPrefix("tt") ? $0 : nil }
-            ?? ids?.tmdb.map { "tmdb:\($0)" }
-            ?? ids?.slug.map { "trakt:\($0)" }
-        guard let id else { return nil }
+        guard let id = ids?.relatedContentID else { return nil }
+        let poster = images?.poster?.first ?? images?.fanart?.first
         return RelatedTitle(
             id: id,
             type: "series",
             name: name,
-            posterURL: (images?.poster?.first ?? images?.fanart?.first)?.normalizedTraktImageURL,
+            posterURL: poster?.normalizedTraktImageURL,
             year: year.map(String.init),
             rating: nil,
             overview: overview

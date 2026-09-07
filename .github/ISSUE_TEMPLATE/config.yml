@@ -1,8 +1,14 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Upstream repository (bobsupra/NuvioTVOS)
+    url: https://github.com/bobsupra/NuvioTVOS
+    about: Canonical tvOS Nuvio app — releases, docs, and pull requests go here.
+  - name: Report a bug or request a feature upstream
+    url: https://github.com/bobsupra/NuvioTVOS/issues/new/choose
+    about: This fork has Issues disabled. File bugs and ideas on the upstream tracker.
   - name: Downloads / Releases
     url: https://github.com/bobsupra/NuvioTVOS/releases
-    about: Grab the latest release here.
-  - name: Documentation
+    about: Grab official Apple TV builds from upstream Releases.
+  - name: Upstream documentation
     url: https://github.com/bobsupra/NuvioTVOS/blob/main/README.md
-    about: Read the README for setup and usage details.
+    about: Setup and usage details for the canonical repository.

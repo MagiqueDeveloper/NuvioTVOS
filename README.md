@@ -1,3 +1,10 @@
+> **Development fork.** This repository is MagiqueDeveloper's working copy for changes destined for [`bobsupra/NuvioTVOS`](https://github.com/bobsupra/NuvioTVOS). It is not the canonical app, release channel, or issue tracker.
+>
+> - **Upstream (releases, issues, PRs):** https://github.com/bobsupra/NuvioTVOS  
+> - **This fork (WIP branches / experiments):** https://github.com/MagiqueDeveloper/NuvioTVOS  
+> - **Nightly IPA (this fork):** pushes to `main` and a daily schedule refresh the rolling [`nightly`](https://github.com/MagiqueDeveloper/NuvioTVOS/releases/tag/nightly) prerelease (`NuvioTV.ipa`, SideStore-style stable URL)
+> - Open bugs and feature requests on the [upstream issue tracker](https://github.com/bobsupra/NuvioTVOS/issues). Download official builds from [upstream Releases](https://github.com/bobsupra/NuvioTVOS/releases).
+
 <div align="center">
 
   <img src="https://github.com/tapframe/NuvioTV/blob/main/assets/brand/app_logo_wordmark.png" alt="Nuvio" width="300" />
@@ -96,9 +103,11 @@ Simkl's PIN flow does not need a Client Secret. The Client ID stays on that Appl
 
 ## About
 
-This repository started as a fork of the Nuvio mobile app. The focus of this fork is now the tvOS version: a native SwiftUI Apple TV app under [tvosApp](./tvosApp) with Apple TV navigation, focus handling, profile selection, catalog browsing, details screens, search, library/watchlist surfaces, and playback controls designed for the Siri Remote.
+This tree is a **development fork** of [bobsupra/NuvioTVOS](https://github.com/bobsupra/NuvioTVOS). Product direction, official releases, and community issues live upstream. Use this repo for WIP branches, review builds, and preparing pull requests back to upstream.
 
-The original shared mobile code is still present in [composeApp](./composeApp), with the inherited iOS app under [iosApp](./iosApp). The active tvOS development surface is [tvosApp/NuvioTV](./tvosApp/NuvioTV).
+The app itself is **tvOS-only**: a native SwiftUI Apple TV client under [tvosApp](./tvosApp) with Apple TV navigation, focus handling, profile selection, catalog browsing, details screens, search, library/watchlist surfaces, and playback controls designed for the Siri Remote.
+
+The active development surface is [tvosApp/NuvioTV](./tvosApp/NuvioTV). Android / Kotlin Multiplatform and iOS phone targets are not part of this repository.
 
 ## Current tvOS App
 
@@ -134,8 +143,21 @@ The Xcode project targets Apple TV (`SDKROOT = appletvos`) with bundle id `com.n
 ## Setup
 
 ```bash
-git clone <your-fork-url> NuvioTVOS
+git clone https://github.com/MagiqueDeveloper/NuvioTVOS.git
 cd NuvioTVOS
+```
+
+For the canonical upstream tree instead:
+
+```bash
+git clone --recurse-submodules https://github.com/bobsupra/NuvioTVOS.git
+cd NuvioTVOS
+```
+
+If you already cloned upstream without submodules:
+
+```bash
+git submodule update --init --recursive
 ```
 
 Install pods if the CocoaPods workspace has not been generated:
@@ -159,7 +181,7 @@ Use the `NuvioTV` scheme and an Apple TV simulator.
 The helper script builds the native tvOS app, installs it on the first booted Apple TV simulator, and launches it:
 
 ```bash
-./scripts/run-mobile.sh tvos s
+./scripts/run-tvos.sh
 ```
 
 If no Apple TV simulator is booted, open Simulator or Xcode first and start one, then rerun the command.
@@ -212,15 +234,14 @@ Some older verification scripts in `tvosApp/` still carry inherited iOS wording.
 - `tvosApp/NuvioTV/Sources/ViewModels/` contains the Swift view models for tvOS flows.
 - `tvosApp/NuvioTV/Sources/Data/Repository/` contains catalog, metadata, source, and subtitle fetching.
 - `tvosApp/NuvioTV/Sources/Core/Auth/` contains Supabase email and TV QR-login support.
-- `MPVKit/` is the local Swift Package used for playback.
-- `composeApp/` and `iosApp/` are inherited from the mobile fork and remain useful references while tvOS functionality is ported.
+- `MPVKit/` is a vendored [NuvioMedia/MPVKit](https://github.com/NuvioMedia/MPVKit) snapshot (MoltenVK tvOS) whose `Libmpv` binary is hosted on this fork's [`mpvkit-libmpv`](https://github.com/MagiqueDeveloper/NuvioTVOS/releases/tag/mpvkit-libmpv) release.
+- `Vendor/AetherEngine/` is the primary playback engine package.
 
 ## Built With
 
 - SwiftUI and UIKit focus/input bridging for tvOS
 - AetherEngine and MPVKit playback engines
 - Configurable catalog, source, and subtitle APIs
-- Kotlin Multiplatform / Compose Multiplatform code inherited from the mobile fork
 
 ## Legal & DMCA
 

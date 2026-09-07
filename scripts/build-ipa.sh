@@ -7,6 +7,7 @@ TVOS_WORKSPACE="$ROOT_DIR/tvosApp/NuvioTV.xcworkspace"
 TVOS_SCHEME="NuvioTV"
 OUTPUT_DIR="$ROOT_DIR/build-ipa"
 ARCHIVE_DIR="$(mktemp -d)/NuvioTV.xcarchive"
+GIT_SHA="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 cleanup() {
   rm -rf "$(dirname "$ARCHIVE_DIR")"
@@ -33,8 +34,9 @@ if [[ ! -d "$APP_PATH" ]]; then
 fi
 
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Info.plist" 2>/dev/null || echo "latest")
+BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Info.plist" 2>/dev/null || echo "0")
 
-echo "==> Packaging unsigned IPA for version ${VERSION}..."
+echo "==> Packaging unsigned IPA for version ${VERSION} (${BUILD}, ${GIT_SHA})..."
 rm -rf "$OUTPUT_DIR/Payload" "$OUTPUT_DIR"/*.ipa
 mkdir -p "$OUTPUT_DIR/Payload"
 cp -R "$APP_PATH" "$OUTPUT_DIR/Payload/"
@@ -42,8 +44,17 @@ cp -R "$APP_PATH" "$OUTPUT_DIR/Payload/"
 (
   cd "$OUTPUT_DIR"
   zip -qry "NuvioTV-unsigned.ipa" Payload
+  # Stable SideStore-style name used by the rolling Nightly release URL.
+  cp "NuvioTV-unsigned.ipa" "NuvioTV.ipa"
   cp "NuvioTV-unsigned.ipa" "NuvioTV-${VERSION}-unsigned-release.ipa"
+  cp "NuvioTV-unsigned.ipa" "NuvioTV-${VERSION}-${GIT_SHA}-unsigned.ipa"
 )
+
+{
+  echo "version=${VERSION}"
+  echo "build=${BUILD}"
+  echo "git_sha=${GIT_SHA}"
+} > "$OUTPUT_DIR/build-metadata.env"
 
 echo "==> Unsigned IPA created successfully:"
 ls -lh "$OUTPUT_DIR"/*.ipa
