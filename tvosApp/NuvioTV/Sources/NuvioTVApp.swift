@@ -2966,7 +2966,16 @@ struct TVHomeView: View {
 
     var body: some View {
         let _ = TVHomeDebugTrace.log("home.body.render active=\(isActive) isEnabled=\(isEnabled)")
-        homeRoot
+        // Intermediate `let`s force type-check boundaries under Xcode 26.
+        let loaded = homeAttachLoadEffects(homeRoot)
+        let watching = homeAttachContinueWatchingEffects(loaded)
+        let prefs = homeAttachPreferenceEffects(watching)
+        let focused = homeAttachFocusEffects(prefs)
+        return homeAttachOverlayEffects(focused)
+    }
+
+    private func homeAttachLoadEffects<Content: View>(_ content: Content) -> some View {
+        content
         .task(id: "\(contentIdentity.profileId):\(contentIdentity.catalogRevision):\(tmdbHomeSettingsKey)") {
             await loadWithAutomaticRetry(for: contentIdentity, forceReload: true)
             // Add-on metadata providers are configured by the time Home has
@@ -3009,6 +3018,10 @@ struct TVHomeView: View {
         // Home stays mounted behind Details/Player, so `onAppear` no longer
         // fires on return. Refresh the Continue Watching row whenever the store
         // changes (progress saved during playback, item finished/removed).
+    }
+
+    private func homeAttachContinueWatchingEffects<Content: View>(_ content: Content) -> some View {
+        content
         .onReceive(NotificationCenter.default.publisher(for: ContinueWatchingStore.changedNotification).receive(on: RunLoop.main)) { _ in
             guard isActive else { return }
             refreshContinueWatching()
@@ -3102,6 +3115,10 @@ struct TVHomeView: View {
                 refreshContinueWatching()
             }
         }
+    }
+
+    private func homeAttachPreferenceEffects<Content: View>(_ content: Content) -> some View {
+        content
         .onChange(of: showUnairedNextUp) { _, _ in
             // Local Next Up cards are derived from the episode guide, so the
             // preference must rebuild that row rather than merely re-sort the
@@ -3175,6 +3192,10 @@ struct TVHomeView: View {
             focusWork.landscapeFocusTask?.cancel()
             landscapeFocusedId = nil
         }
+    }
+
+    private func homeAttachFocusEffects<Content: View>(_ content: Content) -> some View {
+        content
         .onChange(of: focusedCardID) { _, newValue in
             if let newValue {
                 if let pendingInitialFocusCardKey {
@@ -3217,6 +3238,10 @@ struct TVHomeView: View {
         // overlays do not: their opacity-zero Home tree is already unfocusable,
         // and handling the overlay transition directly avoids invalidating all
         // resident shelves on Details entry.
+    }
+
+    private func homeAttachOverlayEffects<Content: View>(_ content: Content) -> some View {
+        content
         .onChange(of: isEnabled) { _, enabled in
             TVHomeDebugTrace.log(
                 "home.overlay.isEnabled changed to \(enabled) active=\(isActive) defersPrep=\(focusWork.defersOverlayPreparation)"
