@@ -1,0 +1,145 @@
+name: Preview IPA
+
+# Every push to main rebuilds an unsigned tvOS IPA and refreshes the same
+# rolling prerelease (`preview`) so testers always have one working download.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: preview-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  PREVIEW_TAG: preview
+  PREVIEW_TITLE: tvOS Preview (unsigned)
+  PREVIEW_ASSET: NuvioTV-preview-unsigned.ipa
+
+jobs:
+  build-and-publish:
+    name: Build & update preview release
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          git rev-parse --short HEAD
+
+      - name: Install CocoaPods
+        working-directory: tvosApp
+        run: pod install
+
+      - name: Build unsigned IPA
+        run: ./scripts/build-ipa.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NuvioTV-preview-unsigned-ipa
+          path: |
+            build-ipa/NuvioTV-preview-unsigned.ipa
+            build-ipa/NuvioTV-*-unsigned.ipa
+            build-ipa/build-metadata.env
+          if-no-files-found: error
+
+      - name: Publish to rolling preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # shellcheck disable=SC1091
+          source build-ipa/build-metadata.env
+          export SHORT_SHA="$(git rev-parse --short HEAD)"
+          FULL_SHA="$(git rev-parse HEAD)"
+          export COMMIT_SUBJECT="$(git log -1 --pretty=%s)"
+          export COMMIT_DATE="$(git log -1 --pretty=%cI)"
+          export RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          export COMMIT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${FULL_SHA}"
+          export version build
+
+          NOTES_FILE="$(mktemp)"
+          python3 - "$NOTES_FILE" <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path(os.sys.argv[1])
+          path.write_text(
+              "\n".join(
+                  [
+                      "Rolling unsigned Apple TV build from `main`.",
+                      "",
+                      "This is a **development preview** for [MagiqueDeveloper/NuvioTVOS](https://github.com/MagiqueDeveloper/NuvioTVOS). Official releases stay on [bobsupra/NuvioTVOS](https://github.com/bobsupra/NuvioTVOS/releases).",
+                      "",
+                      "| | |",
+                      "|---|---|",
+                      f"| **App version** | {os.environ['version']} ({os.environ['build']}) |",
+                      f"| **Commit** | [`{os.environ['SHORT_SHA']}`]({os.environ['COMMIT_URL']}) — {os.environ['COMMIT_SUBJECT']} |",
+                      f"| **Committed** | {os.environ['COMMIT_DATE']} |",
+                      f"| **Workflow** | [run {os.environ['GITHUB_RUN_ID']}]({os.environ['RUN_URL']}) |",
+                      "",
+                      "### Download",
+                      "",
+                      f"Use **{os.environ['PREVIEW_ASSET']}** — this file is replaced on every `main` push.",
+                      "",
+                      "Sideload with Xcode, Apple Configurator, or your preferred signing tool. The IPA is unsigned.",
+                      "",
+                  ]
+              )
+          )
+          PY
+
+          if gh release view "$PREVIEW_TAG" >/dev/null 2>&1; then
+            gh release edit "$PREVIEW_TAG" \
+              --title "$PREVIEW_TITLE" \
+              --notes-file "$NOTES_FILE" \
+              --prerelease \
+              --draft=false
+          else
+            gh release create "$PREVIEW_TAG" \
+              --title "$PREVIEW_TITLE" \
+              --notes-file "$NOTES_FILE" \
+              --prerelease \
+              --target "$FULL_SHA"
+          fi
+
+          # Keep one stable asset name so the download URL never changes.
+          gh release upload "$PREVIEW_TAG" \
+            "build-ipa/${PREVIEW_ASSET}" \
+            --clobber
+
+          # Also keep a SHA-stamped copy for archival within the same release.
+          SHA_ASSET="NuvioTV-${version}-${SHORT_SHA}-unsigned.ipa"
+          if [[ -f "build-ipa/${SHA_ASSET}" ]]; then
+            # Drop older SHA-stamped IPAs so the release stays lean.
+            existing="$(gh release view "$PREVIEW_TAG" --json assets --jq '.assets[].name')"
+            while IFS= read -r asset; do
+              [[ -n "$asset" ]] || continue
+              if [[ "$asset" == NuvioTV-*-unsigned.ipa && "$asset" != "$PREVIEW_ASSET" ]]; then
+                gh release delete-asset "$PREVIEW_TAG" "$asset" --yes || true
+              fi
+            done <<< "$existing"
+            gh release upload "$PREVIEW_TAG" "build-ipa/${SHA_ASSET}" --clobber
+          fi
+
+          echo "Preview release updated:"
+          gh release view "$PREVIEW_TAG" --json url,tagName,isPrerelease,assets \
+            --jq '{url,tagName,isPrerelease,assets:[.assets[].name]}'

@@ -2,6 +2,7 @@
 >
 > - **Upstream (releases, issues, PRs):** https://github.com/bobsupra/NuvioTVOS  
 > - **This fork (WIP branches / experiments):** https://github.com/MagiqueDeveloper/NuvioTVOS  
+> - **Preview IPA (this fork):** every push to `main` refreshes the rolling [`preview`](https://github.com/MagiqueDeveloper/NuvioTVOS/releases/tag/preview) prerelease (`NuvioTV-preview-unsigned.ipa`)  
 > - Open bugs and feature requests on the [upstream issue tracker](https://github.com/bobsupra/NuvioTVOS/issues). Download official builds from [upstream Releases](https://github.com/bobsupra/NuvioTVOS/releases).
 
 <div align="center">

@@ -37,7 +37,7 @@ jobs:
 
           tag="$RELEASE_TAG"
           if [ -z "$tag" ]; then
-            tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq '[.[] | select(.draft == false)] | first | .tag_name')"
+            tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq '[.[] | select(.draft == false and .prerelease == false)] | first | .tag_name')"
           fi
 
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > /tmp/release.json
@@ -92,7 +92,7 @@ jobs:
           else
             tag="$RELEASE_TAG"
             if [ -z "$tag" ]; then
-              tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq '[.[] | select(.draft == false)] | first | .tag_name')"
+              tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq '[.[] | select(.draft == false and .prerelease == false)] | first | .tag_name')"
             fi
             release_tags="$tag"
           fi
