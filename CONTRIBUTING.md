@@ -38,7 +38,7 @@ Describe the problem, use case, proposed solution, and alternatives. Wait for ex
 - Catalog, source, Cloud Library, and Top Shelf integrations benefit from real-account/device testing.
 - The main known issue is occasional horizontal scrolling stutter while artwork loads.
 - If login returns to the Apple TV Home screen, attach a device console or crash log.
-- The optional `NuvioTVandroid/` reference checkout is not required.
+- The optional Android reference checkout is not part of this repository.
 
 ## Pull request checklist
 

@@ -54,7 +54,7 @@ body:
     attributes:
       label: Install method
       options:
-        - GitHub Release / App Store / Play Store
+        - GitHub Release
         - TestFlight
         - CI build / Nightly
         - Built from source
@@ -69,14 +69,6 @@ body:
       options:
         - Apple TV (tvOS)
         - tvOS simulator
-        - iOS (iPhone)
-        - iOS (iPad)
-        - iOS simulator
-        - macOS (desktop)
-        - Android (phone/tablet)
-        - Android emulator
-        - Windows (desktop)
-        - Linux (desktop)
         - Other (please describe below)
     validations:
       required: true
@@ -85,8 +77,8 @@ body:
     id: device_model
     attributes:
       label: Device model
-      description: "Example: iPhone 15 Pro, Pixel 8, MacBook Air M2, etc."
-      placeholder: "e.g. iPhone 15 Pro"
+      description: "Example: Apple TV 4K (3rd generation)"
+      placeholder: "e.g. Apple TV 4K"
     validations:
       required: true
 
@@ -94,7 +86,7 @@ body:
     id: os_version
     attributes:
       label: OS version
-      placeholder: "e.g. iOS 18.1, Android 14, macOS 15.2"
+      placeholder: "e.g. tvOS 18.5"
     validations:
       required: true
 
@@ -120,7 +112,7 @@ body:
         - Settings
         - Sync (Trakt / remote)
         - Downloads / Offline
-        - Platform-specific (iOS only / Android only / Desktop only)
+        - Platform-specific (tvOS / Apple TV)
         - Other
     validations:
       required: true
@@ -220,9 +212,7 @@ body:
         For other bug reports, logs are optional but still helpful.
 
         **Apple TV (tvOS):** Settings → Privacy & Security → Analytics & Improvements → Analytics Data (look for files starting with Nuvio)
-        **iOS:** Crash log from Xcode Organizer, Analytics Data, or Console.app
-        **Android:** `adb logcat -d | tail -n 300`
-        **Desktop:** Terminal/console output from around the time the issue occurred
+        Or attach Console.app / Xcode device logs from around the time of the issue.
       render: shell
       placeholder: |
         Paste logs here

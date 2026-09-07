@@ -96,9 +96,9 @@ Simkl's PIN flow does not need a Client Secret. The Client ID stays on that Appl
 
 ## About
 
-This repository started as a fork of the Nuvio mobile app. The focus of this fork is now the tvOS version: a native SwiftUI Apple TV app under [tvosApp](./tvosApp) with Apple TV navigation, focus handling, profile selection, catalog browsing, details screens, search, library/watchlist surfaces, and playback controls designed for the Siri Remote.
+This repository is the **tvOS-only** Nuvio Apple TV app: a native SwiftUI client under [tvosApp](./tvosApp) with Apple TV navigation, focus handling, profile selection, catalog browsing, details screens, search, library/watchlist surfaces, and playback controls designed for the Siri Remote.
 
-The original shared mobile code is still present in [composeApp](./composeApp), with the inherited iOS app under [iosApp](./iosApp). The active tvOS development surface is [tvosApp/NuvioTV](./tvosApp/NuvioTV).
+The active development surface is [tvosApp/NuvioTV](./tvosApp/NuvioTV). Android / Kotlin Multiplatform and iOS phone targets are not part of this repository.
 
 ## Current tvOS App
 
@@ -134,8 +134,14 @@ The Xcode project targets Apple TV (`SDKROOT = appletvos`) with bundle id `com.n
 ## Setup
 
 ```bash
-git clone <your-fork-url> NuvioTVOS
+git clone --recurse-submodules <your-fork-url> NuvioTVOS
 cd NuvioTVOS
+```
+
+If you already cloned without submodules:
+
+```bash
+git submodule update --init --recursive
 ```
 
 Install pods if the CocoaPods workspace has not been generated:
@@ -159,7 +165,7 @@ Use the `NuvioTV` scheme and an Apple TV simulator.
 The helper script builds the native tvOS app, installs it on the first booted Apple TV simulator, and launches it:
 
 ```bash
-./scripts/run-mobile.sh tvos s
+./scripts/run-tvos.sh
 ```
 
 If no Apple TV simulator is booted, open Simulator or Xcode first and start one, then rerun the command.
@@ -212,15 +218,14 @@ Some older verification scripts in `tvosApp/` still carry inherited iOS wording.
 - `tvosApp/NuvioTV/Sources/ViewModels/` contains the Swift view models for tvOS flows.
 - `tvosApp/NuvioTV/Sources/Data/Repository/` contains catalog, metadata, source, and subtitle fetching.
 - `tvosApp/NuvioTV/Sources/Core/Auth/` contains Supabase email and TV QR-login support.
-- `MPVKit/` is the local Swift Package used for playback.
-- `composeApp/` and `iosApp/` are inherited from the mobile fork and remain useful references while tvOS functionality is ported.
+- `MPVKit/` is the [NuvioMedia/MPVKit](https://github.com/NuvioMedia/MPVKit) submodule used for playback fallback.
+- `Vendor/AetherEngine/` is the primary playback engine package.
 
 ## Built With
 
 - SwiftUI and UIKit focus/input bridging for tvOS
 - AetherEngine and MPVKit playback engines
 - Configurable catalog, source, and subtitle APIs
-- Kotlin Multiplatform / Compose Multiplatform code inherited from the mobile fork
 
 ## Legal & DMCA
 
