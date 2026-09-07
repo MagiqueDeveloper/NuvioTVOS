@@ -1,0 +1,180 @@
+name: Nightly
+
+# SideStore-style rolling nightly: fixed tag `nightly`, stable IPA asset name,
+# changelog since last successful publish, daily schedule + main pushes.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 00:00 UTC daily (same idea as SideStore's nightly cron)
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  NIGHTLY_TAG: nightly
+  NIGHTLY_TITLE: Nightly
+  NIGHTLY_ASSET: NuvioTV.ipa
+  WORKFLOW_FILE: Nightly
+
+jobs:
+  build-and-publish:
+    name: Build & update Nightly release
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find last successful nightly commit
+        id: last_success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          LAST="$(python3 scripts/ci/nightly_release.py last-successful-commit \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow "${WORKFLOW_FILE}" \
+            --branch main || true)"
+          # Ignore the current in-flight SHA if gh ever returns it.
+          if [[ "$LAST" == "$GITHUB_SHA" ]]; then
+            LAST=""
+          fi
+          echo "sha=${LAST}" >> "$GITHUB_OUTPUT"
+          echo "Last successful nightly commit: ${LAST:-<none>}"
+
+      - name: Check for new changes (schedule only)
+        id: check_changes
+        if: github.event_name == 'schedule'
+        run: |
+          set -euo pipefail
+          NEW_COMMITS="$(python3 scripts/ci/nightly_release.py count-new-commits '${{ steps.last_success.outputs.sha }}')"
+          SHOULD_BUILD=false
+          if [[ "${NEW_COMMITS}" -ge 1 ]]; then
+            SHOULD_BUILD=true
+          fi
+          echo "new_commits=${NEW_COMMITS}" >> "$GITHUB_OUTPUT"
+          echo "should_build=${SHOULD_BUILD}" >> "$GITHUB_OUTPUT"
+          echo "New commits since last success: ${NEW_COMMITS} (build=${SHOULD_BUILD})"
+
+      - name: Build gate
+        id: build_gate
+        run: |
+          set -euo pipefail
+          SHOULD_SKIP=false
+          if [[ "${{ github.event_name }}" == "schedule" && "${{ steps.check_changes.outputs.should_build }}" != "true" ]]; then
+            SHOULD_SKIP=true
+          fi
+          echo "should_skip=${SHOULD_SKIP}" >> "$GITHUB_OUTPUT"
+          if [[ "${SHOULD_SKIP}" == "true" ]]; then
+            echo "No new commits since last successful Nightly — skipping."
+          fi
+
+      - name: Select Xcode
+        if: steps.build_gate.outputs.should_skip != 'true'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        if: steps.build_gate.outputs.should_skip != 'true'
+        run: |
+          xcodebuild -version
+          swift --version
+          git rev-parse --short HEAD
+
+      - name: Install CocoaPods
+        if: steps.build_gate.outputs.should_skip != 'true'
+        working-directory: tvosApp
+        run: pod install
+
+      - name: Build unsigned IPA
+        if: steps.build_gate.outputs.should_skip != 'true'
+        run: ./scripts/build-ipa.sh
+
+      - name: Upload workflow artifact
+        if: steps.build_gate.outputs.should_skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NuvioTV-nightly-ipa
+          path: |
+            build-ipa/NuvioTV.ipa
+            build-ipa/NuvioTV-*.ipa
+            build-ipa/build-metadata.env
+          if-no-files-found: error
+
+      - name: Publish Nightly release
+        if: steps.build_gate.outputs.should_skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # shellcheck disable=SC1091
+          source build-ipa/build-metadata.env
+          SHORT_SHA="$(git rev-parse --short=8 HEAD)"
+          FULL_SHA="$(git rev-parse HEAD)"
+          UTC_DATE="$(date -u +%Y%m%d)"
+          NIGHTLY_VERSION="${version}-${UTC_DATE}.${GITHUB_RUN_NUMBER}+${SHORT_SHA}"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          NOTES_FILE="$(mktemp)"
+
+          python3 scripts/ci/nightly_release.py write-notes \
+            --output "${NOTES_FILE}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --version "${version}" \
+            --build "${build}" \
+            --nightly-version "${NIGHTLY_VERSION}" \
+            --commit "${FULL_SHA}" \
+            --last-success "${{ steps.last_success.outputs.sha }}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-url "${RUN_URL}" \
+            --asset-name "${NIGHTLY_ASSET}"
+
+          # Ensure stable SideStore-style asset name exists.
+          cp -f "build-ipa/NuvioTV.ipa" "build-ipa/${NIGHTLY_ASSET}"
+
+          if gh release view "${NIGHTLY_TAG}" >/dev/null 2>&1; then
+            gh release edit "${NIGHTLY_TAG}" \
+              --title "${NIGHTLY_TITLE}" \
+              --notes-file "${NOTES_FILE}" \
+              --prerelease \
+              --draft=false
+          else
+            gh release create "${NIGHTLY_TAG}" \
+              --title "${NIGHTLY_TITLE}" \
+              --notes-file "${NOTES_FILE}" \
+              --prerelease \
+              --target "${FULL_SHA}"
+          fi
+
+          # Replace the stable IPA (constant download URL).
+          gh release upload "${NIGHTLY_TAG}" \
+            "build-ipa/${NIGHTLY_ASSET}" \
+            --clobber
+
+          # Keep a single SHA-stamped copy for forensics; drop older stamped IPAs.
+          SHA_ASSET="NuvioTV-${NIGHTLY_VERSION}-unsigned.ipa"
+          cp -f "build-ipa/NuvioTV.ipa" "build-ipa/${SHA_ASSET}"
+          existing="$(gh release view "${NIGHTLY_TAG}" --json assets --jq '.assets[].name')"
+          while IFS= read -r asset; do
+            [[ -n "$asset" ]] || continue
+            if [[ "$asset" != "${NIGHTLY_ASSET}" && "$asset" == NuvioTV-*-unsigned.ipa ]]; then
+              gh release delete-asset "${NIGHTLY_TAG}" "$asset" --yes || true
+            fi
+          done <<< "$existing"
+          gh release upload "${NIGHTLY_TAG}" "build-ipa/${SHA_ASSET}" --clobber
+
+          echo "Nightly release updated (${NIGHTLY_VERSION}):"
+          gh release view "${NIGHTLY_TAG}" --json url,tagName,isPrerelease,assets \
+            --jq '{url,tagName,isPrerelease,assets:[.assets[].name]}'

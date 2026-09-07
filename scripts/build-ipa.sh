@@ -44,8 +44,8 @@ cp -R "$APP_PATH" "$OUTPUT_DIR/Payload/"
 (
   cd "$OUTPUT_DIR"
   zip -qry "NuvioTV-unsigned.ipa" Payload
-  # Stable name used by the rolling preview release download URL.
-  cp "NuvioTV-unsigned.ipa" "NuvioTV-preview-unsigned.ipa"
+  # Stable SideStore-style name used by the rolling Nightly release URL.
+  cp "NuvioTV-unsigned.ipa" "NuvioTV.ipa"
   cp "NuvioTV-unsigned.ipa" "NuvioTV-${VERSION}-unsigned-release.ipa"
   cp "NuvioTV-unsigned.ipa" "NuvioTV-${VERSION}-${GIT_SHA}-unsigned.ipa"
 )
