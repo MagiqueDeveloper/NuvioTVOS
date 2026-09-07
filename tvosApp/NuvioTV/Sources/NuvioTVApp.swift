@@ -2875,6 +2875,7 @@ struct TVHomeView: View {
     @AppStorage(SettingsKey.homeLayout) private var homeLayout = "Modern"
     @AppStorage(SettingsKey.heroCatalogs) private var heroCatalogsData = Data()
     @AppStorage(SettingsKey.posterLabels) private var posterLabels = false
+    @AppStorage(SettingsKey.catalogAddonNames) private var catalogAddonNames = true
     @AppStorage(SettingsKey.tmdbEnabled) private var tmdbEnabled = false
     @AppStorage(SettingsKey.tmdbLanguage) private var tmdbLanguage = "en"
     @AppStorage(SettingsKey.tmdbUseArtwork) private var tmdbUseArtwork = true
@@ -3507,7 +3508,8 @@ struct TVHomeView: View {
                                         if section.isLoadingPlaceholder {
                                             TVLoadingCatalogRow(
                                                 title: section.title,
-                                                addonName: section.addonName
+                                                addonName: section.addonName,
+                                                showCatalogAddonNames: catalogAddonNames
                                             )
                                                 .frame(
                                                     height: estimatedHeight(for: section),
@@ -3569,6 +3571,7 @@ struct TVHomeView: View {
                                                 id: section.id,
                                                 title: section.title,
                                                 addonName: section.addonName,
+                                                showCatalogAddonNames: catalogAddonNames,
                                                 horizontalEdgeInset: horizontalEdgeInset,
                                                 items: section.items,
                                                 progressByItemId: (section.id == TVHomeSection.continueWatchingId || section.id == TVHomeSection.upcomingId)
@@ -3804,6 +3807,7 @@ struct TVHomeView: View {
                             id: section.id,
                             title: section.title,
                             addonName: section.addonName,
+                            showCatalogAddonNames: catalogAddonNames,
                             horizontalEdgeInset: heroBleed,
                             items: section.items,
                             progressByItemId: continueWatchingByMetaId,
@@ -3857,6 +3861,7 @@ struct TVHomeView: View {
                         TVHomeCatalogGridSection(
                             section: section,
                             watchedTitleKeys: watchedTitleKeys,
+                            showCatalogAddonNames: catalogAddonNames,
                             initialFocusCardKey: initialFocusCardKey,
                             externalFocus: $focusedCardID,
                             restrictFocusToCardKey: overlayRestoreCardID,
