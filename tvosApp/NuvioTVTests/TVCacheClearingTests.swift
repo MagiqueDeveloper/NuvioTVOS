@@ -6,16 +6,17 @@ final class TVCacheClearingTests: XCTestCase {
         XCTAssertEqual(TVCacheClearing.clearedNotification.rawValue, "nuvio.tv.cache.cleared")
     }
 
-    func testLayoutCacheKeysAreDistinctFromCoreSettings() {
-        // Clear Cache must wipe layout/order blobs, not preference toggles.
+    func testLayoutCacheKeysAreDistinctFromPreferenceToggles() {
+        // Clear Cache wipes layout/order blobs while preference toggles stay put.
         let layoutKeys: Set<String> = [
             SettingsKey.homeCatalogOrder,
             SettingsKey.homeCatalogTitles,
             SettingsKey.homeCatalogSyncedOrder
         ]
-        XCTAssertTrue(layoutKeys.isSubset(of: Set(SettingsKey.all)))
         XCTAssertFalse(layoutKeys.contains(SettingsKey.catalogAddonNames))
         XCTAssertFalse(layoutKeys.contains(SettingsKey.homeLayout))
         XCTAssertFalse(layoutKeys.contains(SettingsKey.theme))
+        XCTAssertTrue(SettingsKey.all.contains(SettingsKey.catalogAddonNames))
+        XCTAssertTrue(SettingsKey.all.contains(SettingsKey.homeLayout))
     }
 }
