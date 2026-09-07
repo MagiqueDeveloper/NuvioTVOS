@@ -142,7 +142,10 @@ jobs:
             --asset-name "${NIGHTLY_ASSET}"
 
           # Ensure stable SideStore-style asset name exists.
-          cp -f "build-ipa/NuvioTV.ipa" "build-ipa/${NIGHTLY_ASSET}"
+          # BSD `cp` exits 1 when source and dest are the same path.
+          if [[ "${NIGHTLY_ASSET}" != "NuvioTV.ipa" ]]; then
+            cp -f "build-ipa/NuvioTV.ipa" "build-ipa/${NIGHTLY_ASSET}"
+          fi
 
           if gh release view "${NIGHTLY_TAG}" >/dev/null 2>&1; then
             gh release edit "${NIGHTLY_TAG}" \
