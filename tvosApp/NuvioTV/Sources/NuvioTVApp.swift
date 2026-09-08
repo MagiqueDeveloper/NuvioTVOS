@@ -30,10 +30,14 @@ struct NuvioTVApp: App {
     }
 }
 
-/// Temporary Home performance tracing. Enabled by default in DEBUG so console
-/// output shows main-thread stalls, or via `-TVHomeDebugTrace` argument.
+/// Temporary Home performance tracing. Keep the hot-path instrumentation out of
+/// release builds: Home renders and focus changes call into this type frequently.
 enum TVHomeDebugTrace {
-    static var enabled = true
+    #if DEBUG
+    static let enabled = true
+    #else
+    static let enabled = false
+    #endif
     private static let logger = Logger(
         subsystem: "com.pyksel.nuviotvos",
         category: "TVTrace"
@@ -831,11 +835,9 @@ struct ContentView: View {
         // session still makes retries/idempotent duplicate callbacks harmless.
         guard !callback.isError else { return }
 
-        let duration = session.duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
-        let progress = callback.progress ?? callback.position.flatMap { position in
-            guard let duration, position.isFinite, position >= 0 else { return nil }
-            return position / duration
-        }
+        let duration = callback.duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            ?? session.duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let progress = callback.completionProgress(using: duration)
         guard let progress, progress.isFinite, (0...1).contains(progress) else { return }
 
         let isEpisode = session.meta.isSeries && session.season != nil && session.episode != nil
