@@ -22,12 +22,15 @@ node_modules/
 **/Pods/
 logs/
 analysis/
-Docs
+# Upstream used `Docs` for generated material. Keep this fork's `docs/` tracked
+# (macOS gitignore is case-insensitive, so `/Docs` would also hide `/docs`).
+/Docs
+!/docs/
+!/docs/**
 keystore/
 scripts/build-distribution.sh
 asset
 tools
-AGENTS.md
 server
 
 # Built IPAs are distributed via GitHub Releases, not committed
