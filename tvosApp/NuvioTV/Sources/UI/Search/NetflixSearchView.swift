@@ -5,21 +5,19 @@ import SwiftUI
 /// search screen. Wired to the same `CatalogRepository` search use case as
 /// `SearchView` via `NetflixSearchViewModel`.
 ///
-/// Text entry uses a real tvOS `TextField` in the search layout. Its native
-/// editor stays in the focus hierarchy while the visible text is rendered by
-/// the app's glass chrome, preventing tvOS's default white focus platter from
-/// covering the design. This preserves the full-size linear alphabet keyboard,
-/// suggestions strip, Siri dictation, and native focus transitions.
+/// Text entry uses the same tvOS `.searchable` host as Native search, so
+/// Netflix gets the identical full-size linear keyboard, 123/space/delete
+/// controls, and Siri dictation while retaining its own result layout.
 ///
-/// Reuses `PosterGridCard`, `GlassChip`, `GlassCapsule`, `GlassChipBackground`,
-/// `PosterCardButtonStyle`, `DiscoverSection`, `SearchContentType` and
-/// `ContentReleasePolicy` from `SearchView.swift` rather than duplicating them.
+/// Reuses `PosterGridCard`, `GlassChip`, `GlassCapsule`,
+/// `GlassChipBackground`, `PosterCardButtonStyle`, `DiscoverSection`,
+/// `SearchContentType` and `ContentReleasePolicy` from `SearchView.swift`.
 private enum NetflixSearchMetrics {
     /// Sits on top of tvOS's own ~80pt overscan safe area, so this only needs
     /// to be big enough that a focused key/card's scale-up doesn't visually
     /// touch the safe-area boundary.
-    /// Match Classic Search's outer gutter so every Netflix Search surface,
-    /// not only Discover, shares the same centered content column.
+    /// Match Classic Search's outer gutter so every Netflix Search surface —
+    /// not only Discover — shares the same centered content column.
     static let pageInset: CGFloat = 36
     static let posterWidth: CGFloat = 190
     static let posterHeight: CGFloat = 285
@@ -34,9 +32,6 @@ struct NetflixSearchView: View {
     let onContentClick: (String, String) -> Void
     var onLongPress: ((NuvioMeta) -> Void)? = nil
 
-    /// The query field is the screen's entry point. Its native editor remains
-    /// focusable so tvOS owns keyboard presentation and Siri dictation.
-    @FocusState private var searchFieldFocused: Bool
     /// One shared focus id-space for both the text list and the poster grid,
     /// namespaced ("list:"/"grid:") so the same result can be focused in
     /// either column without the two bindings fighting over one id.
@@ -52,6 +47,10 @@ struct NetflixSearchView: View {
     @State private var overlayRestoreItemID: String?
     @State private var overlayRestoreGeneration = 0
     @State private var discoverOverlayTransitionActive = false
+    /// Match Native search: the tvOS keyboard stays mounted for focus
+    /// restoration but collapses while browsing results.
+    @State private var searchPresented = true
+    @State private var resultFocusGeneration = 0
     @Environment(\.isEnabled) private var isEnabled
     @AppStorage(SettingsKey.amoled) private var amoled = false
     @AppStorage(SettingsKey.bodyColor) private var bodyColor = SettingsBackground.charcoal.rawValue
@@ -68,71 +67,110 @@ struct NetflixSearchView: View {
         ZStack(alignment: .top) {
             Color.nuvioBackground(amoled: amoled, body: bodyColor).ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 20) {
-                queryHeader
-                    .disabled(overlayRestoreItemID != nil || discoverOverlayTransitionActive)
+            VStack(alignment: .leading, spacing: 0) {
+                NativeSearchKeyboardHost(
+                    text: $viewModel.searchText,
+                    prompt: L10n.string("search_placeholder", fallback: "Search movies & series"),
+                    isPresented: $searchPresented,
+                    isDisabled: overlayRestoreItemID != nil || discoverOverlayTransitionActive
+                )
 
-                if viewModel.hasQuery {
-                    typeFilterRow
-                        .disabled(overlayRestoreItemID != nil)
-                    resultsBody
-                } else {
-                    if !viewModel.recentSearches.isEmpty {
-                        recentRow
-                            .disabled(discoverOverlayTransitionActive)
-                    }
-                    if showDiscover {
-                        DiscoverSection(
-                            onContentClick: onContentClick,
-                            onLongPress: onLongPress,
-                            parentTransitionActive: $discoverOverlayTransitionActive
-                        )
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                VStack(alignment: .leading, spacing: 20) {
+                    if viewModel.hasQuery {
+                        typeFilterRow
+                            .disabled(overlayRestoreItemID != nil || (searchPresented && focusedTypeFilterID == nil))
+                        resultsBody
                     } else {
-                        centeredState {
-                            messageState(
-                                icon: "rectangle.grid.2x2",
-                                title: L10n.string(
-                                    "search_start_subtitle_no_discover",
-                                    fallback: "Discover is disabled. Enter at least 2 characters"
-                                )
+                        if !viewModel.recentSearches.isEmpty {
+                            recentRow
+                                .disabled(discoverOverlayTransitionActive)
+                        }
+                        if showDiscover {
+                            DiscoverSection(
+                                onContentClick: onContentClick,
+                                onLongPress: onLongPress,
+                                onCardFocus: {
+                                    withAnimation(.easeInOut(duration: 0.22)) {
+                                        searchPresented = false
+                                    }
+                                },
+                                onFilterFocus: {
+                                    showKeyboard()
+                                },
+                                onFocusExit: {
+                                    // A recent-search chip is directly above Discover.
+                                    // If focus moved there, keep it there instead of
+                                    // stealing it back for the query field.
+                                    guard isEnabled,
+                                          !discoverOverlayTransitionActive,
+                                          focusedRecentSearchID == nil else { return }
+                                    showKeyboard()
+                                },
+                                parentTransitionActive: $discoverOverlayTransitionActive
                             )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        } else {
+                            centeredState {
+                                messageState(
+                                    icon: "rectangle.grid.2x2",
+                                    title: L10n.string(
+                                        "search_start_subtitle_no_discover",
+                                        fallback: "Discover is disabled. Enter at least 2 characters"
+                                    )
+                                )
+                            }
                         }
                     }
                 }
+                .padding(.horizontal, NetflixSearchMetrics.pageInset)
+                .padding(.top, 40)
+                .ignoresSafeArea(.container, edges: .bottom)
             }
-            .padding(.horizontal, NetflixSearchMetrics.pageInset)
-            .padding(.top, 16)
-            .ignoresSafeArea(.container, edges: .bottom)
         }
         .onAppear {
             viewModel.reloadRecent()
         }
-        .onDisappear {
-            searchFieldFocused = false
-        }
         .onExitCommand(perform: canHandleExitCommand ? handleExitCommand : nil)
         .onChange(of: focusedItemID) { _, newValue in
+            resultFocusGeneration &+= 1
+            let generation = resultFocusGeneration
             if let newValue {
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    searchPresented = false
+                }
                 lastFocusedItemID = newValue
                 shouldRestoreFocus = false
                 if isEnabled, newValue == overlayRestoreItemID { overlayRestoreItemID = nil }
             } else if lastFocusedItemID != nil {
-                shouldRestoreFocus = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
+                    guard resultFocusGeneration == generation,
+                          focusedItemID == nil,
+                          focusedTypeFilterID == nil,
+                          viewModel.hasQuery,
+                          isEnabled,
+                          overlayRestoreItemID == nil else { return }
+                    showKeyboard()
+                    shouldRestoreFocus = true
+                }
             }
+        }
+        .onChange(of: focusedTypeFilterID) { _, newValue in
+            if newValue != nil { showKeyboard() }
         }
         .onChange(of: isEnabled) { _, enabled in
             if !enabled {
                 overlayRestoreGeneration &+= 1
                 overlayRestoreItemID = focusedItemID ?? lastFocusedItemID
             } else if let target = overlayRestoreItemID {
+                searchPresented = false
                 restoreOverlayFocus(to: target, generation: overlayRestoreGeneration)
             }
         }
     }
 
     private func restoreOverlayFocus(to target: String, generation: Int) {
-        for delay in [0.12, 0.45] {
+        searchPresented = false
+        for delay in [0.06, 0.12, 0.45] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 if overlayRestoreGeneration == generation, overlayRestoreItemID == target {
                     focusedItemID = target
@@ -146,50 +184,102 @@ struct NetflixSearchView: View {
         }
     }
 
-    // MARK: - Header: query field (system keyboard + dictation)
+    private var canHandleExitCommand: Bool {
+        guard isEnabled,
+              overlayRestoreItemID == nil,
+              !discoverOverlayTransitionActive else { return false }
+        return focusedItemID != nil ||
+            focusedTypeFilterID != nil ||
+            focusedRecentSearchID != nil ||
+            clearRecentFocused ||
+            (!searchPresented && (viewModel.hasQuery || showDiscover))
+    }
 
-    /// Keeps the real tvOS editor in the focus hierarchy while rendering the
-    /// query with the same glass treatment used by the rest of Search. The
-    /// editor is nearly transparent rather than off-screen, so the native
-    /// keyboard is attached directly to this search surface.
-    private var queryHeader: some View {
-        ZStack(alignment: .leading) {
-            TextField(
-                "",
-                text: $viewModel.searchText
-            )
-            .textFieldStyle(.plain)
-            .focused($searchFieldFocused)
-            .focusEffectDisabledIfAvailable()
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .frame(maxWidth: .infinity, minHeight: 72)
-            // tvOS's native editor paints a white focus platter even when
-            // the app supplies its own background. Keep the editor alive and
-            // focusable, but let the glass overlay below own the appearance.
-            .opacity(0.02)
+    private func handleExitCommand() {
+        showKeyboard()
+        focusedItemID = nil
+        focusedTypeFilterID = nil
+        focusedRecentSearchID = nil
+        clearRecentFocused = false
+    }
 
-            HStack(spacing: 16) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.7))
-
-                Text(
-                    viewModel.searchText.isEmpty
-                        ? L10n.string("search_placeholder", fallback: "Search for movies and TV shows")
-                        : viewModel.searchText
-                )
-                .font(.system(size: 30, weight: .medium))
-                .foregroundColor(viewModel.searchText.isEmpty ? .white.opacity(0.45) : .white)
-                .lineLimit(1)
-                .allowsHitTesting(false)
-            }
-            .allowsHitTesting(false)
+    /// Re-expands the shared Native search host after focus leaves results.
+    private func showKeyboard() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            searchPresented = true
         }
-        .padding(.horizontal, 26)
-        .frame(height: 72)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(GlassCapsule(focused: searchFieldFocused))
+    }
+
+    /// tvOS can continue processing the same Up press after `onMoveCommand`
+    /// returns. Hold the source card through that pass, reveal the keyboard,
+    /// then land on the All filter as the intermediate focus stop.
+    private func transferFirstRowFocusToAllFilter() {
+        guard let sourceFocusID = focusedItemID else {
+            showKeyboard()
+            return
+        }
+
+        resultFocusGeneration &+= 1
+        let generation = resultFocusGeneration
+        showKeyboard()
+
+        // Claim the current card again so this Up press cannot also open the
+        // adaptive tab sidebar/menu. This mirrors the app's grid-hero focus guard.
+        focusedItemID = sourceFocusID
+        DispatchQueue.main.async {
+            guard resultFocusGeneration == generation,
+                  searchPresented,
+                  isEnabled else { return }
+            focusedItemID = sourceFocusID
+            DispatchQueue.main.async {
+                guard searchPresented,
+                      isEnabled,
+                      focusedItemID == sourceFocusID else { return }
+                focusedItemID = nil
+                focusedTypeFilterID = "type:\(SearchContentType.all.rawValue)"
+            }
+        }
+    }
+
+    /// Claim the filter for the remainder of its Up press, then enter the
+    /// keyboard on the next focus pass so the adaptive sidebar cannot win.
+    private func transferTypeFilterFocusToKeyboard() {
+        guard let sourceFocusID = focusedTypeFilterID else {
+            showKeyboard()
+            return
+        }
+
+        resultFocusGeneration &+= 1
+        let generation = resultFocusGeneration
+        showKeyboard()
+
+        focusedTypeFilterID = sourceFocusID
+        DispatchQueue.main.async {
+            guard resultFocusGeneration == generation,
+                  searchPresented,
+                  isEnabled else { return }
+            focusedTypeFilterID = sourceFocusID
+            DispatchQueue.main.async {
+                guard searchPresented,
+                      isEnabled,
+                      focusedTypeFilterID == sourceFocusID else { return }
+                focusedTypeFilterID = nil
+            }
+        }
+    }
+
+    private func transferRecentRowFocusToKeyboard() {
+        resultFocusGeneration &+= 1
+        let generation = resultFocusGeneration
+        showKeyboard()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            guard resultFocusGeneration == generation,
+                  searchPresented,
+                  isEnabled else { return }
+            focusedRecentSearchID = nil
+            clearRecentFocused = false
+        }
     }
 
     // MARK: - Type filter
@@ -214,6 +304,10 @@ struct NetflixSearchView: View {
                     .font(.system(size: 22, weight: .medium))
                     .foregroundColor(.white.opacity(0.5))
             }
+        }
+        .onMoveCommand { direction in
+            guard direction == .up, focusedTypeFilterID != nil else { return }
+            transferTypeFilterFocusToKeyboard()
         }
     }
 
@@ -268,7 +362,7 @@ struct NetflixSearchView: View {
     private var resultsList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
-                ForEach(visibleResults) { item in
+                ForEach(Array(visibleResults.enumerated()), id: \.element.id) { index, item in
                     let focusID = "list:\(item.id)"
                     let isFocused = focusedItemID == focusID
                     Button {
@@ -289,12 +383,17 @@ struct NetflixSearchView: View {
                     .focused($focusedItemID, equals: focusID)
                     .focusEffectDisabledIfAvailable()
                     .disabled(overlayRestoreItemID != nil && overlayRestoreItemID != focusID)
+                    .onMoveCommand { direction in
+                        guard index == 0, direction == .up else { return }
+                        transferFirstRowFocusToAllFilter()
+                    }
                 }
             }
             .padding(.top, 6)
             .padding(.bottom, 40)
         }
         .frame(width: NetflixSearchMetrics.listWidth)
+        .disabled(searchPresented && focusedTypeFilterID == nil && focusedItemID == nil)
         .focusSection()
         .defaultFocusIfAvailable($focusedItemID, defaultItemFocusID)
     }
@@ -312,7 +411,11 @@ struct NetflixSearchView: View {
                         focusValue: focusID,
                         retainFocusAppearance: overlayRestoreItemID == focusID,
                         onLongPress: onLongPress.map { cb in { cb(item) } },
-                        forceShowLabels: true
+                        forceShowLabels: true,
+                        onMove: index < gridColumns.count ? { direction in
+                            guard direction == .up else { return }
+                            transferFirstRowFocusToAllFilter()
+                        } : nil
                     ) {
                         overlayRestoreItemID = focusID
                         lastFocusedItemID = focusID
@@ -329,6 +432,29 @@ struct NetflixSearchView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
+        .defaultFocusIfAvailable($focusedItemID, defaultGridFocusID)
+    }
+
+    private var defaultGridFocusID: String? {
+        if shouldRestoreFocus,
+           let saved = lastFocusedItemID,
+           saved.hasPrefix("grid:"),
+           visibleResults.contains(where: { "grid:\($0.id)" == saved }) {
+            return saved
+        }
+        return visibleResults.first.map { "grid:\($0.id)" }
+    }
+
+    /// List row the results area should focus when it (re)gains focus: the
+    /// row the user left on when armed and still present, else the first one.
+    private var defaultItemFocusID: String? {
+        if shouldRestoreFocus,
+           let saved = lastFocusedItemID,
+           saved.hasPrefix("list:"),
+           visibleResults.contains(where: { "list:\($0.id)" == saved }) {
+            return saved
+        }
+        return nil
     }
 
     /// A 1080p Apple TV has room for six of these posters beside the text
@@ -343,18 +469,6 @@ struct NetflixSearchView: View {
             ),
             count: 6
         )
-    }
-
-    /// List row the results area should focus when it (re)gains focus: the
-    /// row the user left on when armed and still present, else the first one.
-    private var defaultItemFocusID: String? {
-        if shouldRestoreFocus,
-           let saved = lastFocusedItemID,
-           saved.hasPrefix("list:"),
-           visibleResults.contains(where: { "list:\($0.id)" == saved }) {
-            return saved
-        }
-        return visibleResults.first.map { "list:\($0.id)" }
     }
 
     // MARK: Recent searches (shown above Discover when idle)
@@ -403,6 +517,10 @@ struct NetflixSearchView: View {
             }
             .scrollClipDisabledIfAvailable()
         }
+        .onMoveCommand { direction in
+            guard direction == .up else { return }
+            transferRecentRowFocusToKeyboard()
+        }
     }
 
     // MARK: - Shared states
@@ -433,24 +551,5 @@ struct NetflixSearchView: View {
             }
         }
         .frame(maxWidth: 700)
-    }
-
-    // MARK: - Focus helpers
-
-    /// Back button from the results returns to the query field, matching the
-    /// old behavior where Menu re-opened the on-screen keyboard.
-    private func focusSearchField() {
-        guard isEnabled, overlayRestoreItemID == nil, !discoverOverlayTransitionActive else { return }
-        searchFieldFocused = true
-    }
-    private var canHandleExitCommand: Bool {
-        guard isEnabled,
-              overlayRestoreItemID == nil,
-              !discoverOverlayTransitionActive else { return false }
-        return focusedItemID != nil || focusedTypeFilterID != nil
-    }
-
-    private func handleExitCommand() {
-        focusSearchField()
     }
 }

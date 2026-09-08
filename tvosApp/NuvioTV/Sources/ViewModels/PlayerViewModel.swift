@@ -232,9 +232,6 @@ class PlayerViewModel: ObservableObject {
     private var pendingExternalSubtitles: [NuvioSubtitle] = []
     private var didAddExternalSubtitles = false
     private var addedExternalSubtitleURLs: Set<String> = []
-    /// Maps an engine-local path (`file:///…` or absolute path) back to the
-    /// original add-on subtitle URL so the Settings panel can keep matching.
-    private var externalSubtitleIdentityByEngineURL: [String: String] = [:]
     private var pendingSelectedExternalSubtitleURL: String?
     private var subtitleFetchTask: Task<Void, Never>?
     private var activeTrackSelectionKey: String?
@@ -589,10 +586,7 @@ class PlayerViewModel: ObservableObject {
             audioURL: nil,
             resumePositionSeconds: pendingResumeSeconds,
             httpHeaders: httpHeaders,
-            // Remote add-on sidecars are downloaded then `sub-add`ed after the
-            // engine is ready. Passing them here would attach stream auth headers
-            // (MPV http-header-fields / Aether LoadOptions) and break OpenSubtitles.
-            externalSubtitles: [],
+            externalSubtitles: pendingExternalSubtitles,
             preferredAudioLanguages: preferredAudioLanguageCodes(),
             preferredSubtitleLanguages: preferredSubtitleLanguageCodes(),
             matchContentEnabled: matchContent,
@@ -615,12 +609,12 @@ class PlayerViewModel: ObservableObject {
             request,
             requiresMPVAudioControls: audioDelayMs != 0 || audioAmplificationDb > 0
         )
-        // The coordinator owns initial seek on both backends; external add-on
-        // subtitles are prepared and attached through the incremental path below.
+        // The coordinator owns initial seek and subtitle registration on both
+        // backends; later progressive subtitle results still flow through the
+        // incremental path below.
         didApplyResume = (request.resumePositionSeconds ?? 0) > 5
-        didAddExternalSubtitles = pendingExternalSubtitles.isEmpty
-        addedExternalSubtitleURLs = []
-        externalSubtitleIdentityByEngineURL = [:]
+        didAddExternalSubtitles = true
+        addedExternalSubtitleURLs.formUnion(request.externalSubtitles.map(\.url))
         activeEngineKind = sessionCoordinator.activeBackend
         hdrModeToast = sessionCoordinator.statusToast
         if let toast = sessionCoordinator.statusToast {
@@ -640,11 +634,29 @@ class PlayerViewModel: ObservableObject {
 
     private static func isLiveContentType(_ type: String) -> Bool {
         switch type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "channel", "live", "livetv", "live-tv", "tv", "iptv", "radio":
+        case "channel", "channels", "live", "livetv", "live-tv", "live_tv", "iptv", "radio", "sports", "sport", "stream", "streams", "event", "events", "broadcast", "feed":
             return true
         default:
             return false
         }
+    }
+
+    private static func isLiveStream(meta: NuvioMeta, url: URL?) -> Bool {
+        if isLiveContentType(meta.type) { return true }
+        let id = meta.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if id.hasPrefix("iptv:") || id.hasPrefix("live:") || id.hasPrefix("channel:") || id.hasPrefix("stream:") {
+            return true
+        }
+        let name = meta.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if name.hasPrefix("now:") || name.hasPrefix("live:") || name.hasPrefix("[live]") || name.hasPrefix("(live)") {
+            return true
+        }
+        if let urlString = url?.absoluteString.lowercased() {
+            if urlString.contains("/live/") || urlString.contains("/iptv/") || urlString.contains("live.m3u8") {
+                return true
+            }
+        }
+        return false
     }
 
     /// Applies all per-stream state for a title/episode. Shared by the initial
@@ -689,7 +701,7 @@ class PlayerViewModel: ObservableObject {
         isLoadingExternalSubtitles = false
         self.title = meta.name
         self.subtitle = subtitle
-        self.isLiveStream = Self.isLiveContentType(meta.type)
+        self.isLiveStream = Self.isLiveStream(meta: meta, url: url)
         self.livePlaybackHasStarted = false
         self.liveBufferingBeganAt = nil
         self.status = .buffering
@@ -756,7 +768,6 @@ class PlayerViewModel: ObservableObject {
         )
         self.didAddExternalSubtitles = pendingExternalSubtitles.isEmpty
         self.addedExternalSubtitleURLs = []
-        self.externalSubtitleIdentityByEngineURL = [:]
         self.pendingSelectedExternalSubtitleURL = nil
         self.isAISubtitleTranslationManuallyEnabled = false
         if !preserveSessionPreferences {
@@ -1221,6 +1232,10 @@ class PlayerViewModel: ObservableObject {
     /// at the last known position.
     private func recoverExpiredStream() {
         if let url = activeStreamURL { failedStreamURLs.insert(url) }
+        if let meta = activeMeta {
+            let numbers = resolvedEpisodeNumbers
+            LastPlaybackStreamStore.remove(metaId: meta.id, season: numbers?.season, episode: numbers?.episode)
+        }
         attemptFailover(
             reason: "This stream link has expired. Go back and start it again to load a fresh stream.",
             toast: nil
@@ -1260,6 +1275,10 @@ class PlayerViewModel: ObservableObject {
             if let url = self.activeStreamURL {
                 self.failedStreamURLs.insert(url)
             }
+            if let meta = self.activeMeta {
+                let numbers = self.resolvedEpisodeNumbers
+                LastPlaybackStreamStore.remove(metaId: meta.id, season: numbers?.season, episode: numbers?.episode)
+            }
             self.attemptFailover(
                 reason: "The source didn't start within \(self.loadTimeoutSeconds) seconds. Every available source was tried.",
                 toast: nil
@@ -1280,6 +1299,17 @@ class PlayerViewModel: ObservableObject {
 
     private var storedResumePositionForActiveItem: Double? {
         guard let meta = activeMeta else { return nil }
+        if RemoteTrackingState.isProgressSourceAuthenticated {
+            guard let item = TraktProgressService.currentContinueWatchingItem(for: meta),
+                  !item.isUpNextEntry else { return nil }
+            if meta.isSeries {
+                guard let numbers = resolvedEpisodeNumbers else { return item.resumePosition }
+                if let itemSeason = item.season, let itemEpisode = item.episode {
+                    guard itemSeason == numbers.season && itemEpisode == numbers.episode else { return nil }
+                }
+            }
+            return item.resumePosition
+        }
         if meta.isSeries {
             let numbers = resolvedEpisodeNumbers
             return ContinueWatchingStore.resumePosition(
@@ -1310,6 +1340,11 @@ class PlayerViewModel: ObservableObject {
             return
         }
 
+        if let meta = activeMeta {
+            let numbers = resolvedEpisodeNumbers
+            LastPlaybackStreamStore.remove(metaId: meta.id, season: numbers?.season, episode: numbers?.episode)
+        }
+
         let decision = LiveStreamFailoverPolicy.decide(
             isLive: isLiveStream,
             currentURL: activeStreamURL,
@@ -1334,9 +1369,13 @@ class PlayerViewModel: ObservableObject {
         engine.pausePlayback()
         if let toast { showPlayerToast(toast) }
 
-        // Prefer the last stable position (slate/error ticks can lie).
-        let resume = lastStablePlaybackTime?.current
-            ?? (time.current > 5 ? time.current : nil)
+        // Prefer the last stable position from genuine playback; if the stream failed/expired
+        // before stable playback, keep the initial resume target or fall back to store.
+        let stableCurrent = (lastStablePlaybackTime?.current).flatMap { $0 > 0 ? $0 : nil }
+        let liveCurrent = (time.current > 5 && !loadedStreamLooksLikeReplacement()) ? time.current : nil
+        let resume = stableCurrent
+            ?? liveCurrent
+            ?? pendingResumeSeconds
             ?? storedResumePositionForActiveItem
 
         let excluded = decision.exclusions
@@ -1559,6 +1598,24 @@ class PlayerViewModel: ObservableObject {
         let rawCurrent = Double(c.positionMs) / 1000.0
         let rawDuration = Double(c.durationMs) / 1000.0
         let latestTime = PlayerTime(current: rawCurrent, duration: rawDuration)
+
+        // Dynamically detect live streams (streams without finite duration when active frames are decoding).
+        if !isLiveStream,
+           c.isPlayerPlaying,
+           !c.isPlayerLoading,
+           !c.isPlayerEnded,
+           !isAwaitingStreamStart,
+           c.durationMs <= 0,
+           time.duration <= 0 {
+            isLiveStream = true
+        } else if isLiveStream,
+                  let activeMeta,
+                  !Self.isLiveStream(meta: activeMeta, url: activeStreamURL.flatMap(URL.init(string:))),
+                  c.durationMs > 0,
+                  c.hasCoherentTimeSample {
+            isLiveStream = false
+        }
+
         let isPreSeekSettlingSample: Bool = {
             guard let checkpoint = explicitSeekProgressCheckpoint else { return false }
             let seekConfirmed = abs(latestTime.current - checkpoint.time.current) <= 2
@@ -1566,10 +1623,12 @@ class PlayerViewModel: ObservableObject {
                 >= Self.explicitSeekSettleWindow
             return !seekConfirmed && !protectionExpired
         }()
+        let isReplacementSlate = subtitle != PlaybackMarkers.trailerSubtitle && !isLiveStream && loadedStreamLooksLikeReplacement()
         if !isLiveStream,
            c.hasCoherentTimeSample,
            !c.isPlayerLoading,
            !c.isAtEndOfFile,
+           !isReplacementSlate,
            latestTime.duration > 0,
            latestTime.current >= 0,
            latestTime.current < latestTime.duration {
@@ -1695,6 +1754,10 @@ class PlayerViewModel: ObservableObject {
         // mpv hard-failed this source — try the next one before surfacing UI.
         if !c.currentErrorMessage.isEmpty, !isFailingOver, !isReloadingStream {
             if let url = activeStreamURL { failedStreamURLs.insert(url) }
+            if let meta = activeMeta {
+                let numbers = resolvedEpisodeNumbers
+                LastPlaybackStreamStore.remove(metaId: meta.id, season: numbers?.season, episode: numbers?.episode)
+            }
             attemptFailover(
                 reason: c.currentErrorMessage,
                 toast: nil
@@ -1786,16 +1849,20 @@ class PlayerViewModel: ObservableObject {
         if audioTracks != latestAudioTracks { audioTracks = latestAudioTracks }
 
         var subs = c.subtitleTracks.map {
-            SubtitleTrack(
-                id: "\($0.id)",
-                name: $0.title,
-                language: $0.lang,
-                isSelected: $0.selected,
-                externalFilename: identityURL(forEngineFilename: $0.externalFilename),
-                isNativelyRenderedSubtitle: $0.isNativelyRenderedSubtitle
-            )
+            SubtitleTrack(id: "\($0.id)", name: $0.title,
+                          language: $0.lang, isSelected: $0.selected,
+                          externalFilename: $0.externalFilename,
+                          isNativelyRenderedSubtitle: $0.isNativelyRenderedSubtitle)
         }
-        let anySelected = subs.contains { $0.isSelected }
+        if let selectedURL = pendingSelectedExternalSubtitleURL,
+           let selectedTrack = subs.first(where: { $0.externalFilename == selectedURL }) {
+            subs = subs.map { var t = $0; t.isSelected = (t.id == selectedTrack.id); return t }
+            pendingSelectedExternalSubtitleURL = nil
+            if let id = Int(selectedTrack.id) {
+                c.selectSubtitle(id)
+            }
+        }
+        let anySelected = subs.contains { $0.isSelected } || pendingSelectedExternalSubtitleURL != nil
         subs.insert(SubtitleTrack(id: "off", name: "Off", language: "",
                                   isSelected: !anySelected), at: 0)
         if subtitles != subs { subtitles = subs }
@@ -1804,11 +1871,6 @@ class PlayerViewModel: ObservableObject {
         applyAudioPreferenceIfNeeded()
         applySubtitlePreferenceIfNeeded()
         guard c === engine else { return }
-        if let selectedURL = pendingSelectedExternalSubtitleURL,
-           let selectedTrack = subtitles.first(where: { $0.externalFilename == selectedURL }) {
-            selectSubtitle(selectedTrack, persist: false)
-            pendingSelectedExternalSubtitleURL = nil
-        }
         if let selectedNativeTrack = subtitles.first(where: {
             $0.isSelected && $0.isNativelyRenderedSubtitle
         }) {
@@ -2530,6 +2592,7 @@ class PlayerViewModel: ObservableObject {
     // MARK: - Track selection
 
     func selectSubtitle(_ track: SubtitleTrack, persist: Bool = true) {
+        pendingSelectedExternalSubtitleURL = nil
         if track.isNativelyRenderedSubtitle,
            handoffForNativelyRenderedSubtitle(track, persist: persist) {
             subtitles = subtitles.map { var item = $0; item.isSelected = (item.id == track.id); return item }
@@ -2578,6 +2641,29 @@ class PlayerViewModel: ObservableObject {
         hdrModeToast = "Compatibility player (subtitle controls)"
         showPlayerToast("Compatibility player (subtitle controls)")
         return true
+    }
+
+    /// Returns true if an external subtitle is currently active or pending selection.
+    var hasSelectedExternalSubtitle: Bool {
+        if pendingSelectedExternalSubtitleURL != nil { return true }
+        return availableExternalSubtitles.contains { isExternalSubtitleSelected($0) }
+    }
+
+    /// Checks if a specific external subtitle is currently active in playback tracks,
+    /// pending activation, or was selected in the current session.
+    func isExternalSubtitleSelected(_ subtitle: NuvioSubtitle) -> Bool {
+        if let track = subtitles.first(where: { $0.externalFilename == subtitle.url }) {
+            return track.isSelected
+        }
+        if pendingSelectedExternalSubtitleURL == subtitle.url {
+            return true
+        }
+        if let currentSaved = pendingTrackSelection?.subtitle,
+           currentSaved.kind == .external,
+           currentSaved.externalURL == subtitle.url {
+            return true
+        }
+        return false
     }
 
     /// Selects an external subtitle from the panel: if mpv already loaded this
@@ -2648,46 +2734,14 @@ class PlayerViewModel: ObservableObject {
             let selected = subtitlesToAdd.remove(at: index)
             subtitlesToAdd.append(selected)
         }
-        guard !subtitlesToAdd.isEmpty else {
-            didAddExternalSubtitles = true
-            return
+        subtitlesToAdd.forEach { subtitle in
+            engine.addSubtitle(
+                subtitle,
+                select: subtitle.url == pendingSelectedExternalSubtitleURL
+            )
+            addedExternalSubtitleURLs.insert(subtitle.url)
         }
-        // Mark in-flight so poll ticks do not start a second download wave.
         didAddExternalSubtitles = true
-        let selectedURL = pendingSelectedExternalSubtitleURL
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            for subtitle in subtitlesToAdd {
-                let prepared = await ExternalSubtitleFileCache.shared.prepare(subtitle)
-                self.rememberEngineIdentity(for: prepared)
-                self.engine.addSubtitle(
-                    prepared,
-                    select: prepared.url == selectedURL
-                )
-                self.addedExternalSubtitleURLs.insert(prepared.url)
-            }
-        }
-    }
-
-    private func rememberEngineIdentity(for subtitle: NuvioSubtitle) {
-        guard let playbackURL = subtitle.playbackURL, !playbackURL.isEmpty else { return }
-        externalSubtitleIdentityByEngineURL[playbackURL] = subtitle.url
-        if let fileURL = URL(string: playbackURL), fileURL.isFileURL {
-            externalSubtitleIdentityByEngineURL[fileURL.path] = subtitle.url
-            externalSubtitleIdentityByEngineURL[fileURL.absoluteString] = subtitle.url
-        }
-    }
-
-    private func identityURL(forEngineFilename filename: String) -> String {
-        guard !filename.isEmpty else { return filename }
-        if let identity = externalSubtitleIdentityByEngineURL[filename] {
-            return identity
-        }
-        if let fileURL = URL(string: filename), fileURL.isFileURL,
-           let identity = externalSubtitleIdentityByEngineURL[fileURL.path] {
-            return identity
-        }
-        return filename
     }
 
     private func applySavedTrackSelectionsIfNeeded() {
@@ -3282,6 +3336,7 @@ class PlayerViewModel: ObservableObject {
               time.duration > 0 else {
             return
         }
+        guard !loadedStreamLooksLikeReplacement() else { return }
 
         didApplyResume = true
         seek(to: min(pendingResumeSeconds, max(time.duration - 5, 0)))
@@ -3319,7 +3374,9 @@ class PlayerViewModel: ObservableObject {
               progressTime.current < progressTime.duration,
               subtitle != PlaybackMarkers.trailerSubtitle,
               !loadedStreamLooksLikeReplacement(),
-              force || progressTime.current >= minimumProgressSeconds else {
+              !didDetectReplacementStream,
+              !isAwaitingStreamStart || didApplyResume,
+              progressTime.current >= minimumProgressSeconds || (force && didApplyResume && progressTime.current > 5) else {
             return
         }
 
@@ -3624,6 +3681,12 @@ class PlayerViewModel: ObservableObject {
 
         didDetectReplacementStream = true
         engine.pausePlayback()
+        lastStablePlaybackTime = nil
+        explicitSeekProgressCheckpoint = nil
+        if let meta = activeMeta {
+            let numbers = resolvedEpisodeNumbers
+            LastPlaybackStreamStore.remove(metaId: meta.id, season: numbers?.season, episode: numbers?.episode)
+        }
         // Try to silently reload a fresh link before surfacing the error.
         recoverExpiredStream()
         return true

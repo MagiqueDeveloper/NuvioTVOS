@@ -85,7 +85,7 @@ struct PostPlayRecommendationOverlay: View {
                 }
             }
             .onReceive(
-                NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)
+                NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime).receive(on: RunLoop.main)
             ) { notification in
                 guard let item = notification.object as? AVPlayerItem,
                       item == trailerPlayer.currentItem else {

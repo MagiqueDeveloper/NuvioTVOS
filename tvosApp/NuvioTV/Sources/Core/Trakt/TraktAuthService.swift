@@ -1319,7 +1319,7 @@ struct TraktProgressService {
         return updatedAt > otherUpdatedAt
     }
 
-    private static func mergingLocalPlaybackCheckpoints(
+    static func mergingLocalPlaybackCheckpoints(
         into remoteItems: [ContinueWatchingItem],
         source: TraktWatchProgressSource
     ) -> [ContinueWatchingItem] {
@@ -1337,13 +1337,57 @@ struct TraktProgressService {
             if let index = merged.firstIndex(where: { WatchedStore.sameContent($0.meta, local.meta) }) {
                 let remote = merged[index]
                 let sameEpisode = remote.season == local.season && remote.episode == local.episode
-                let remoteCaughtUp = sameEpisode && abs(remote.position - local.position) <= 2
-                let remoteIsNewer = remote.lastWatchedAt
-                    > local.lastWatchedAt.addingTimeInterval(1)
-                if remoteCaughtUp || remoteIsNewer {
-                    confirmedItems.append(local)
+                if sameEpisode {
+                    let localProgress = local.duration > 0 ? (local.position / local.duration) : 0
+                    let remoteProgress = remote.duration > 0 ? (remote.position / remote.duration) : 0
+                    let remoteIsSubstantiallyNewer = remote.lastWatchedAt > local.lastWatchedAt.addingTimeInterval(30)
+                    let remoteIsFurther = remoteProgress > (localProgress + 0.01)
+
+                    if remoteIsSubstantiallyNewer && remoteIsFurther {
+                        // User genuinely continued playback on another device.
+                        // Inherit verified stream duration if remote has an estimated duration.
+                        let resolvedDuration = local.duration > 100 ? local.duration : remote.duration
+                        let resolvedPosition = resolvedDuration * remoteProgress
+                        merged[index] = ContinueWatchingItem(
+                            meta: remote.meta,
+                            streamUrl: local.streamUrl.isEmpty ? remote.streamUrl : local.streamUrl,
+                            position: resolvedPosition,
+                            duration: resolvedDuration,
+                            lastWatchedAt: remote.lastWatchedAt,
+                            season: remote.season,
+                            episode: remote.episode,
+                            released: remote.released ?? local.released,
+                            episodeTitleOverride: remote.episodeTitleOverride ?? local.episodeTitleOverride,
+                            episodeOverviewOverride: remote.episodeOverviewOverride ?? local.episodeOverviewOverride,
+                            episodeThumbnailOverride: remote.episodeThumbnailOverride ?? local.episodeThumbnailOverride,
+                            isUpNext: false
+                        )
+                        confirmedItems.append(local)
+                    } else {
+                        // Remote is the server-side confirmation of local playback.
+                        // Preserve exact local playback position and duration measured from the player.
+                        merged[index] = ContinueWatchingItem(
+                            meta: remote.meta,
+                            streamUrl: local.streamUrl.isEmpty ? remote.streamUrl : local.streamUrl,
+                            position: local.position,
+                            duration: local.duration,
+                            lastWatchedAt: max(local.lastWatchedAt, remote.lastWatchedAt),
+                            season: local.season,
+                            episode: local.episode,
+                            released: local.released ?? remote.released,
+                            episodeTitleOverride: local.episodeTitleOverride ?? remote.episodeTitleOverride,
+                            episodeOverviewOverride: local.episodeOverviewOverride ?? remote.episodeOverviewOverride,
+                            episodeThumbnailOverride: local.episodeThumbnailOverride ?? remote.episodeThumbnailOverride,
+                            isUpNext: false
+                        )
+                    }
                 } else {
-                    merged[index] = local
+                    let remoteIsNewer = remote.lastWatchedAt > local.lastWatchedAt.addingTimeInterval(1)
+                    if remoteIsNewer {
+                        confirmedItems.append(local)
+                    } else {
+                        merged[index] = local
+                    }
                 }
             } else {
                 merged.append(local)

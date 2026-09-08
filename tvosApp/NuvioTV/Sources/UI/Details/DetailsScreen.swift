@@ -281,6 +281,7 @@ struct DetailsScreen: View {
         .onDisappear {
             TVHomeDebugTrace.log("details.disappear id=\(id) type=\(type)")
             viewModel.cancelAllTasks()
+            isPreparingPlayback = false
         }
     }
 
@@ -291,6 +292,9 @@ struct DetailsScreen: View {
         PlaybackStartupTiming.cancel()
         TVHomeDebugTrace.log("details.back.cancelTasks id=\(id)")
         viewModel.cancelAllTasks()
+        isSmartPlaybackPending = false
+        isResolvingDebrid = false
+        isPreparingPlayback = false
         onBack()
     }
 
@@ -339,6 +343,7 @@ struct DetailsScreen: View {
 
         if forceManualPicker || !smartStreamSelection {
             isSmartPlaybackPending = false
+            isPreparingPlayback = false
             if reload {
                 viewModel.prepareStreams(forId: streamId, type: type)
             }
@@ -348,6 +353,7 @@ struct DetailsScreen: View {
 
         PlaybackStartupTiming.start(title: meta.name)
         isSmartPlaybackPending = true
+        isPreparingPlayback = false
         isStreamPickerPresented = false
 
         if reload {
@@ -408,11 +414,13 @@ struct DetailsScreen: View {
 
             if isIdealMatch {
                 isSmartPlaybackPending = false
+                isPreparingPlayback = true
                 playStream(stream, meta: meta)
             }
         } else if !viewModel.uiState.isLoadingStreams && (viewModel.uiState.streamsEmptyReason != nil || !viewModel.uiState.streamGroups.isEmpty) {
             PlaybackStartupTiming.cancel()
             isSmartPlaybackPending = false
+            isPreparingPlayback = false
             isStreamPickerPresented = true
         }
     }
@@ -425,32 +433,51 @@ struct DetailsScreen: View {
         PlaybackStartupBenchmark.shared.markSourcePicked(stream: stream)
         if let url = stream.url, !url.isEmpty {
             isStreamPickerPresented = false
-            isPreparingPlayback = false
+            isPreparingPlayback = true
+            isSmartPlaybackPending = false
+            armExternalPlayerTimeoutIfNeeded(player: player)
             onPlayClick(url, stream.httpHeaders ?? [:], meta, pendingEpisodeSubtitle, stream.subtitles, pendingEpisode, orderedEpisodes(for: meta), player)
             return
         }
 
         guard stream.isDebridResolvable, !isResolvingDebrid else {
             isPreparingPlayback = false
+            isSmartPlaybackPending = false
             return
         }
         let season = pendingEpisode?.season
         let episode = pendingEpisode?.episode
         isResolvingDebrid = true
+        isPreparingPlayback = true
         Task {
             let result = await DebridResolver(store: ProfileSettings.current)
                 .resolvedURL(for: stream, season: season, episode: episode)
             await MainActor.run {
                 isResolvingDebrid = false
-                isPreparingPlayback = false
                 if case let .success(url, _, _)? = result {
                     PlaybackStartupBenchmark.shared.markDebridResolved()
                     isStreamPickerPresented = false
+                    isPreparingPlayback = true
+                    isSmartPlaybackPending = false
+                    armExternalPlayerTimeoutIfNeeded(player: player)
                     onPlayClick(url.absoluteString, stream.httpHeaders ?? [:], meta, pendingEpisodeSubtitle, stream.subtitles, pendingEpisode, orderedEpisodes(for: meta), player)
                 } else {
                     PlaybackStartupBenchmark.shared.cancel()
+                    isPreparingPlayback = false
+                    isSmartPlaybackPending = false
                     isStreamPickerPresented = true
                 }
+            }
+        }
+    }
+
+    private func armExternalPlayerTimeoutIfNeeded(player: ExternalPlayer?) {
+        let store = ProfileSettings.current
+        let defaultPlayer = ExternalPlayer.from(store.string(forKey: SettingsKey.externalPlayer))
+        let effectivePlayer = player ?? defaultPlayer
+        if effectivePlayer != .builtIn {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                isPreparingPlayback = false
             }
         }
     }
@@ -2540,16 +2567,16 @@ struct TvDetailsContent: View {
             // stores, and the remote provider's optimistic layer is cleared one
             // hop later — so every one of them has to be able to invalidate this
             // view, not just the mark itself.
-            .onReceive(NotificationCenter.default.publisher(for: WatchedStore.changedNotification)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: WatchedStore.changedNotification).receive(on: RunLoop.main)) { _ in
                 progressRevision &+= 1
             }
-            .onReceive(NotificationCenter.default.publisher(for: ContinueWatchingStore.changedNotification)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: ContinueWatchingStore.changedNotification).receive(on: RunLoop.main)) { _ in
                 progressRevision &+= 1
             }
             .onReceive(
                 NotificationCenter.default.publisher(
                     for: TraktSettingsStore.continueWatchingChangedNotification
-                )
+                ).receive(on: RunLoop.main)
             ) { _ in
                 progressRevision &+= 1
             }
@@ -2991,6 +3018,39 @@ private struct TvDetailsActionRow: View {
     }
 }
 
+private struct TvPlayActionButtonStyle: ButtonStyle {
+    let onHold: (() -> Void)?
+    @Binding var didTriggerHold: Bool
+
+    @State private var holdTask: Task<Void, Never>? = nil
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            #if os(tvOS)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+            #else
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            #endif
+            .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                holdTask?.cancel()
+                holdTask = nil
+                if isPressed {
+                    guard let onHold else { return }
+                    holdTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        guard !Task.isCancelled else { return }
+                        didTriggerHold = true
+                        onHold()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            didTriggerHold = false
+                        }
+                    }
+                }
+            }
+    }
+}
+
 private struct TvDetailsActionButton: View {
     let title: String?
     let systemName: String
@@ -3003,13 +3063,13 @@ private struct TvDetailsActionButton: View {
     let onFocus: () -> Void
     var longPressAction: (() -> Void)? = nil
 
-    @State private var didTriggerLongPress = false
+    @State private var didTriggerHold = false
     private var isFocused: Bool { focus.wrappedValue == tag }
 
     var body: some View {
         Button(action: {
-            if didTriggerLongPress {
-                didTriggerLongPress = false
+            if didTriggerHold {
+                didTriggerHold = false
                 return
             }
             action()
@@ -3033,25 +3093,15 @@ private struct TvDetailsActionButton: View {
             .modifier(TvDetailsGlassBackground(filled: isPrimary || isFocused, shape: Capsule()))
             .shadow(color: .black.opacity(isFocused ? 0.35 : 0.18), radius: isFocused ? 18 : 7, y: 8)
         }
-        .buttonStyle(PosterCardButtonStyle())
+        .buttonStyle(TvPlayActionButtonStyle(onHold: longPressAction, didTriggerHold: $didTriggerHold))
         .focused(focus, equals: tag)
         .focusEffectDisabledIfAvailable()
         .scaleEffect(isFocused ? 1.08 : 1)
         .animation(.easeOut(duration: 0.14), value: isFocused)
         .onChange(of: isFocused) { _, focused in
             if focused { onFocus() }
-            didTriggerLongPress = false
+            didTriggerHold = false
         }
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.48).onEnded { _ in
-                guard longPressAction != nil else { return }
-                didTriggerLongPress = true
-                longPressAction?()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    didTriggerLongPress = false
-                }
-            }
-        )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
@@ -4030,7 +4080,7 @@ private struct TvDetailsEpisodes: View {
             seasonSelector
             episodeCardStrip
         }
-        .onReceive(NotificationCenter.default.publisher(for: WatchedStore.changedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: WatchedStore.changedNotification).receive(on: RunLoop.main)) { _ in
             watchedEpisodeKeys = WatchedStore.watchedEpisodeKeys(meta: meta)
         }
         .onChange(of: episodes) { _, newEpisodes in
@@ -4484,14 +4534,6 @@ private struct TvEpisodeCard: View {
             .onChange(of: isFocused) { _, focused in
                 if focused { onFocus() }
             }
-            // tvOS delivers the Menu press that dismisses a context menu to the
-            // view behind it as well, which backs Details out to Home. Telling
-            // the screen a menu is up lets it swallow exactly that one press.
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                    onMenuOpened()
-                }
-            )
             .contextMenu {
                 if smartStreamSelection, let onPlayManually {
                     Button {
@@ -4542,7 +4584,7 @@ private struct TvEpisodeCard: View {
     /// `setPresentationValue`/menu-lock warnings, so commit on the next settled
     /// main-loop turn instead.
     private func performAfterMenuDismissal(_ action: @escaping () -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             onMenuClosed()
             action()
         }
@@ -4836,7 +4878,7 @@ private struct TvStreamPickerOverlay: View {
                     }
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: StreamBadgeSettingsStore.changedNotification)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: StreamBadgeSettingsStore.changedNotification).receive(on: RunLoop.main)) { _ in
                 streamCardPresentations.removeAll(keepingCapacity: true)
                 streamBadgeSettings = StreamBadgeSettingsStore.snapshot
                 streamBadgeSettingsRevision &+= 1

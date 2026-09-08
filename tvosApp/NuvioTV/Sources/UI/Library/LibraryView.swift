@@ -98,24 +98,26 @@ public struct LibraryView: View {
                     .foregroundColor(.white)
 
                 // Source switch: Saved | Cloud
-                HStack(spacing: 16) {
-                    ForEach(LibrarySourceMode.allCases) { mode in
-                        SourceModeChip(
-                            title: mode.localizedTitle,
-                            isSelected: sourceMode == mode
-                        ) {
-                            if sourceMode != mode {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    sourceMode = mode
-                                }
-                                if mode == .cloud {
-                                    Task { await cloudViewModel.load() }
+                if cloudLibraryAvailable {
+                    HStack(spacing: 16) {
+                        ForEach(LibrarySourceMode.allCases) { mode in
+                            SourceModeChip(
+                                title: mode.localizedTitle,
+                                isSelected: sourceMode == mode
+                            ) {
+                                if sourceMode != mode {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        sourceMode = mode
+                                    }
+                                    if mode == .cloud {
+                                        Task { await cloudViewModel.load() }
+                                    }
                                 }
                             }
                         }
                     }
+                    .disabled(overlayRestoreItemID != nil || overlayRestoreCloudItemID != nil)
                 }
-                .disabled(overlayRestoreItemID != nil || overlayRestoreCloudItemID != nil)
 
                 // Controls row (Dynamic based on Saved vs Cloud)
                 HStack(spacing: 16) {
@@ -284,6 +286,11 @@ public struct LibraryView: View {
             await viewModel.refreshSelectedLibrary()
             if cloudViewModel.isAvailable {
                 await cloudViewModel.load()
+            }
+        }
+        .onChange(of: cloudLibraryAvailable) { _, available in
+            if !available && sourceMode == .cloud {
+                sourceMode = .saved
             }
         }
     }

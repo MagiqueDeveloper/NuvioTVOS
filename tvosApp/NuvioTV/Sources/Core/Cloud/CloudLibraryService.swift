@@ -71,8 +71,11 @@ struct CloudLibraryService {
         }
     }
 
-    /// Whether a cloud library can be browsed right now (supported provider + key).
-    var isAvailable: Bool { !connectedProviders.isEmpty }
+    /// Whether a cloud library can be browsed right now (supported provider + key, and cloud library setting enabled).
+    var isAvailable: Bool {
+        let enabled = store.object(forKey: SettingsKey.cloudLibraryEnabled) as? Bool ?? true
+        return enabled && !connectedProviders.isEmpty
+    }
 
     var providerName: String? {
         if let first = connectedProviders.first {

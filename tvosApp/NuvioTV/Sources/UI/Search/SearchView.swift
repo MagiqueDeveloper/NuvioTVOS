@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Same poster geometry as the See All catalog and Grid Home. Seven columns fit
 /// only because of `pageInset` — the old 80pt inset left room for six.
@@ -42,6 +43,7 @@ struct SearchView: View {
     @State private var overlayRestoreGeneration = 0
     @State private var discoverOverlayTransitionActive = false
     @Environment(\.isEnabled) private var isEnabled
+    @State private var searchTextInputActive = false
     @AppStorage(SettingsKey.amoled) private var amoled = false
     @AppStorage(SettingsKey.bodyColor) private var bodyColor = SettingsBackground.charcoal.rawValue
     @AppStorage(SettingsKey.hideUnreleased) private var hideUnreleased = false
@@ -105,9 +107,6 @@ struct SearchView: View {
         .onAppear {
             viewModel.reloadRecent()
         }
-        .onDisappear {
-            searchBarFocused = false
-        }
         .onChange(of: focusedResultID) { _, newValue in
             if let newValue {
                 restoreArmTask?.cancel()
@@ -167,24 +166,27 @@ struct SearchView: View {
         searchBar
     }
 
-    /// Uses a real tvOS editor so the system keyboard and Siri dictation stay
-    /// attached to the search surface. The editor is nearly transparent while
-    /// the app-owned glass content preserves the existing visual design.
     private var searchBar: some View {
         ZStack(alignment: .leading) {
-            TextField(
-                "",
-                text: $viewModel.searchText
+            HiddenSearchTextField(
+                text: $viewModel.searchText,
+                isEditing: $searchTextInputActive,
             )
-            .textFieldStyle(.plain)
+            .frame(width: 1, height: 1)
+            .offset(x: -4_000)
+            .allowsHitTesting(false)
+
+            Button {
+                searchBarFocused = true
+                searchTextInputActive = true
+            } label: {
+                Color.clear
+                    .frame(maxWidth: .infinity, minHeight: 72)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PosterCardButtonStyle())
             .focused($searchBarFocused)
             .focusEffectDisabledIfAvailable()
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .frame(maxWidth: .infinity, minHeight: 72)
-            // Keep the native editor focusable without allowing tvOS's white
-            // focus platter to cover the custom glass treatment.
-            .opacity(0.02)
 
             // Glass overlay: magnifier + typed text / placeholder + clear.
             HStack(spacing: 18) {
@@ -208,6 +210,7 @@ struct SearchView: View {
                     Button {
                         viewModel.clear()
                         searchBarFocused = true
+                        searchTextInputActive = false
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 30))
@@ -221,7 +224,7 @@ struct SearchView: View {
         .padding(.horizontal, 34)
         .frame(height: 72)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(GlassCapsule(focused: searchBarFocused))
+        .modifier(GlassCapsule(focused: searchBarFocused || searchTextInputActive))
     }
 
     // MARK: - Type filter
@@ -407,6 +410,78 @@ struct SearchView: View {
 }
 
 // MARK: - Result card
+
+// MARK: - Hidden text input
+
+// Internal (not private) so `NetflixSearchView` can reuse the same hidden
+// text field to fall back to tvOS's system keyboard for Siri dictation.
+struct HiddenSearchTextField: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isEditing: Bool
+
+    func makeUIView(context: Context) -> HiddenSearchUITextField {
+        let textField = HiddenSearchUITextField(frame: .zero)
+        textField.delegate = context.coordinator
+        textField.backgroundColor = .clear
+        textField.textColor = .clear
+        textField.tintColor = .clear
+        textField.returnKeyType = .search
+        textField.keyboardAppearance = .dark
+        textField.autocorrectionType = .no
+        textField.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.textDidChange(_:)),
+            for: .editingChanged
+        )
+        return textField
+    }
+
+    func updateUIView(_ uiView: HiddenSearchUITextField, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+        }
+
+        if isEditing && !uiView.isFirstResponder {
+            DispatchQueue.main.async {
+                uiView.becomeFirstResponder()
+            }
+        } else if !isEditing && uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, isEditing: $isEditing)
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        private let text: Binding<String>
+        private let isEditing: Binding<Bool>
+
+        init(text: Binding<String>, isEditing: Binding<Bool>) {
+            self.text = text
+            self.isEditing = isEditing
+        }
+
+        @objc func textDidChange(_ sender: UITextField) {
+            text.wrappedValue = sender.text ?? ""
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            isEditing.wrappedValue = false
+            textField.resignFirstResponder()
+            return true
+        }
+
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            isEditing.wrappedValue = false
+        }
+    }
+}
+
+final class HiddenSearchUITextField: UITextField {
+    override var canBecomeFocused: Bool { false }
+}
 
 // MARK: - Glass components
 

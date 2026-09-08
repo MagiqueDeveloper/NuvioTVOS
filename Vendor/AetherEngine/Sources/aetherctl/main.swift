@@ -67,15 +67,19 @@ func printUsage() {
 
     Usage:
       aetherctl probe <url>
-      aetherctl serve [--no-dv] [--start-position S] <url>
-      aetherctl validate [--no-dv] <url>
+      aetherctl serve [--no-dv] [--force-dv] [--start-position S] <url>
+      aetherctl validate [--no-dv] [--force-dv] <url>
       aetherctl swdecode [--frames N] <url>
       aetherctl play [--seconds N] [--live] [--fast-zap] [--live-start-immediately] [--dvr-window N] [--subs <codec-or-lang>]
+                 [--assert-dv]
                  [--start-position S] [--switch-audio <index>[@ms]]
                  [--teletext-page N] [--switch-teletext-page <page|auto>[@ms]]
+                 [--audio-delay <ms>] [--switch-audio-delay <ms>[@ms]]... [--paused]
+                 [--reload-applying <key>=<value>]... [--reload-applying-at <ms>]
+                 [--drop-audio]
                  [--sequential-origin] [--declared-duration S]
              [--max-concurrent-requests N]
-                     [--audio-stats] [--host-calls play,extractor,setrate,reloadlive,seekback,seekfar] <url>
+                     [--audio-stats] [--host-calls play,extractor,setrate,reloadlive,seekback,seekfar,pauseseek] <url>
                      (full load+play session smoke test; --subs activates the first
                       matching embedded subtitle track and logs overlay cues;
                       --audio-stats taps decoded PCM and prints per-second audio lead
@@ -86,11 +90,20 @@ func printUsage() {
                       applying a language preference just after play, default +20 ms;
                       --teletext-page fixes the caption page at load, while
                       --switch-teletext-page changes it on the playing channel
+                      --drop-audio forces the audio pipeline to fail (AE#462), so
+                      the video-only drop and its published audioDelivery can be
+                      observed without a source this build cannot decode
                       (default +20 s, i.e. after --subs has a track showing);
+                      --reload-applying corrects a LoadOption on the playing
+                      session through #460's session-preserving reload, repeatable;
+                      keys header.<Name>, audio-bridge, preferred-audio,
+                      decode-path, is-live
+                      (is-live is there to show the refusal: a field that names the
+                      session is refused, not silently ignored), default +20 s;
                       --sequential-origin declares a fake-range origin (one unranged
                       GET, no ranged probes) and needs --declared-duration on VOD
                       since the tail estimate is skipped)
-      aetherctl segverify [--from N] [--count K] [--no-dv] [--dump <dir>] <url>
+      aetherctl segverify [--from N] [--count K] [--no-dv] [--force-dv] [--dump <dir>] <url>
                           (#92: SW-decode each segment in isolation; framesDecoded==0 => not independent)
       aetherctl disc-inspect <disc.iso>
       aetherctl dovitest <file>
@@ -99,11 +112,11 @@ func printUsage() {
       aetherctl audiotap [--duration S] [--out PATH.wav] [--remote | --software] <url>
                          (#95: decode the loopback audio track to mono 48k WAV, print continuity stats;
                           --software runs a real session through the SW sink, exit 3 if it yields no audible PCM)
-      aetherctl customio [--memory] [--forward-only] [--audio-only] [--reload] [--switch-audio] [--select-subs] [--extract] [--audio-index N] <file>
-      aetherctl customio --live [--rate-kbps N] [--seconds N] [--dvr-window N] [--report-size] [--no-wrap] [--malloc-census] [--foundation-reader] [--host-carry none|removeFirst|subdata] <file.ts>
+      aetherctl customio [--memory] [--forward-only] [--audio-only] [--reload] [--switch-audio] [--select-subs] [--extract] [--audio-index N] [--reload-decode-path automatic|software] <file>
+      aetherctl customio --live [--rate-kbps N] [--seconds N] [--dvr-window N] [--report-size] [--no-wrap] [--malloc-census] [--foundation-reader] [--host-carry none|removeFirst|subdata] [--reload-at S] [--cancel-latches] [--reload-decode-path automatic|software] <file.ts>
                          (AE#445: a host-owned live spool behind MediaSource.custom, paced at the mux rate,
                           never EOF, unknown size; prints physFP and its slope against that rate)
-      aetherctl live [--seconds N] [--seed <path>] [--dvr-window N] [--serve-only] [--measure-rss] [--report-cache-bytes] [--rewind-test] [--reload-test] [--sw] [--drop-after N] [--discontinuity-at N] [--realtime] [--fast-zap] [--preroll N] [--rewind-hold N] [--gen-highbitrate-seed]
+      aetherctl live [--seconds N] [--seed <path>] [--dvr-window N] [--serve-only] [--measure-rss] [--report-cache-bytes] [--rewind-test] [--reload-test] [--sw] [--drop-after N] [--discontinuity-at N] [--realtime] [--realtime-rate X] [--fast-zap] [--preroll N] [--rewind-hold N] [--gen-highbitrate-seed]
                      [--freeze-after N] [--unfreeze-after N] [--rewind-before-freeze N] [--force-recovery-reload-at N] [--live-only] [--no-blocking-reload] [--force-master]
                      [--freeze-after N] [--unfreeze-after N] [--rewind-before-freeze N] [--force-recovery-reload-at N]
                      [--no-blocking-reload]
@@ -129,7 +142,26 @@ func printUsage() {
                      pretend the display can't render Dolby Vision.
                      Mirrors what AetherEngine.loadNative passes on a
                      non-DV TV / on macOS (where displayCapabilities
-                     reports supportsDolbyVision=false anyway).
+                     reports supportsDolbyVision=false unless the
+                     session asserts it, see `play --assert-dv`).
+      --force-dv     AE#455: serve a DV Profile 8.1 source as Profile 5
+                     (dvh1 + dvcC profile=5, CODECS=dvh1.05.LL) so
+                     AVPlayer composes the RPU itself. Only has an
+                     effect together with --no-dv; a display that does
+                     Dolby Vision keeps the P8.1 route.
+
+    Flags (play only):
+      --assert-dv    AE#493: set LoadOptions.panelPresentsDolbyVision,
+                     the host's assertion that this display presents
+                     Dolby Vision. macOS has no per-mode capability API
+                     (AVPlayer.availableHDRModes is unavailable there)
+                     and HDR eligibility answers HDR10 and HLG but not
+                     DV, so a DV source otherwise plays as its HDR10
+                     base layer with effective-format=hdr10. With the
+                     flag the session serves the DV route (dvh1 tags,
+                     SUPPLEMENTAL-CODECS, master playlist). A wrong
+                     claim costs one in-place media-playlist fallback
+                     (-11868 / -11848), not the item.
 
     Flags (serve / seektest):
       --throttle-kbps N
@@ -280,6 +312,7 @@ if first == "segverify" {
     let fromIdx = takeIntFlag("--from", from: &rest) ?? 0
     let count   = takeIntFlag("--count", from: &rest) ?? 12
     let noDV    = takeFlag("--no-dv", from: &rest)
+    let forceDV = takeFlag("--force-dv", from: &rest)
     let dumpDir = takeStringFlag("--dump", from: &rest)
     guard let urlArg = rest.first(where: { !$0.hasPrefix("--") }) else {
         print("ERROR: segverify requires a <url> argument")
@@ -287,7 +320,8 @@ if first == "segverify" {
     }
     rest.removeAll { $0 == urlArg }
     rejectStrayFlags(rest, subcommand: "segverify")
-    exit(runSegVerify(url: parseSourceURL(urlArg), from: fromIdx, count: count, dvModeAvailable: !noDV, dumpDir: dumpDir))
+    exit(runSegVerify(url: parseSourceURL(urlArg), from: fromIdx, count: count, dvModeAvailable: !noDV,
+                      forceDVWithoutDisplay: forceDV, dumpDir: dumpDir))
 }
 
 // Rapid-seek burst repro (issue #35).
@@ -461,6 +495,10 @@ if first == "live" {
     // --preroll N: backlog seconds the paced fixture bursts before 1x pacing (default 30).
     // 0 models a strict-realtime origin with no backlog (the AE#195 slow-join case).
     let preroll = takeDoubleFlag("--preroll", from: &rest)
+    // --realtime-rate X: pace at X times wall clock after the preroll (implies --realtime). 1x is
+    // `--realtime`; unpaced is a burst that ENDS. Neither covers an origin that keeps running ahead
+    // for the whole session, which is what makes a live edge outrun the client that tracks it.
+    let realtimeRate = takeDoubleFlag("--realtime-rate", from: &rest)
     // --gen-highbitrate-seed: generate ~22 Mbps 1080p H.264 MPEG-TS seed for RSS-retention measurement.
     if takeFlag("--gen-highbitrate-seed", from: &rest) {
         let path = seed ?? "Fixtures/user/highbitrate-1080p.ts"
@@ -502,8 +540,8 @@ if first == "live" {
                  reportCacheBytes: reportCacheBytes, rewindTest: rewindTest,
                  reloadTest: reloadTest,
                  forceSoftware: forceSW, dropAfter: dropAfter,
-                 discontinuityAt: discontinuityAt, realtime: realtime,
-                 fastZap: fastZap, pacingPreroll: preroll,
+                 discontinuityAt: discontinuityAt, realtime: realtime || realtimeRate != nil,
+                 fastZap: fastZap, pacingPreroll: preroll, pacingRate: realtimeRate,
                  freezeAfter: freezeAfter, unfreezeAfter: unfreezeAfter,
                  rewindBeforeFreeze: rewindBeforeFreeze,
                  forceRecoveryReloadAt: forceRecoveryReloadAt,
@@ -551,6 +589,32 @@ if first == "play" {
     let seekCount = takeIntFlag("--seek-count", from: &rest)
     let mallocCensus = takeFlag("--malloc-census", from: &rest)
     let playForceSW = takeFlag("--sw", from: &rest)
+    // AE#493: `LoadOptions.panelPresentsDolbyVision`, the host assertion. macOS has no per-mode display
+    // capability API, so DV is unclaimable from inside the engine and a Mac run routes every DV source
+    // as its HDR10 base layer until the host says otherwise.
+    let playAssertDV = takeFlag("--assert-dv", from: &rest)
+    // AE#492: `LoadOptions.deinterlaceFieldRate`. `send_field` (the default) emits one frame per
+    // FIELD, so a 29.97i source hands the layer 59.94 frames per second against 23.976 for a
+    // progressive one. That is the confound in every per-seek drop count taken across the two, and
+    // `--deinterlace-field-rate frame` is the A/B that separates the rate from the path.
+    let playFieldRateSpec = takeStringFlag("--deinterlace-field-rate", from: &rest)
+    let playFieldRate: DeinterlaceFieldRate
+    if let playFieldRateSpec {
+        guard let parsed = DeinterlaceFieldRate(rawValue: playFieldRateSpec) else {
+            print("ERROR: --deinterlace-field-rate takes field|frame, got '\(playFieldRateSpec)'")
+            exit(64)
+        }
+        playFieldRate = parsed
+    } else {
+        playFieldRate = .field
+    }
+    // AE#462: force the audio pipeline to fail so the video-only drop is observable end to end.
+    // There is no fixture for it: the drop needs a codec this build has no decoder for (AC-4 is the
+    // realistic one), and a threshold that plausible is worth less than the real published value.
+    if takeFlag("--drop-audio", from: &rest) {
+        AetherEngine.setForceAudioPipelineFailureForTesting(true)
+        print("[aetherctl] TEST-ONLY: audio pipeline forced to fail (AE#462 video-only drop)")
+    }
     let censusThresholdMB = takeIntFlag("--census-threshold-mb", from: &rest)
     let censusHz = takeDoubleFlag("--census-hz", from: &rest)
     // Slow-CDN simulation, same hook as `serve` / `seektest`: a local file lets the producer race
@@ -615,6 +679,69 @@ if first == "play" {
         return TeletextPageSwitchRequest(page: page,
                                         delayMilliseconds: parts.count == 2 ? (Int(parts[1]) ?? 20_000) : 20_000)
     }
+    // AE#464: `--audio-delay <ms>` is the load option, `--switch-audio-delay <ms>[@ms]` is the
+    // runtime setter. Same 20 s default as the teletext switch and for the same reason: it has to
+    // land on a session that is playing, or it only re-proves the load option.
+    let audioDelayMs = takeIntFlag("--audio-delay", from: &rest) ?? 0
+    // Round 2: repeatable, so a run can press the stepper more than once. The `@ms` suffixes are
+    // what put two presses inside one runloop turn.
+    var audioDelaySwitches: [AudioDelaySwitchRequest] = []
+    while let spec = takeStringFlag("--switch-audio-delay", from: &rest) {
+        let parts = spec.split(separator: "@", maxSplits: 1).map(String.init)
+        guard let ms = Int(parts[0]) else {
+            print("ERROR: --switch-audio-delay takes <ms>[@ms], got '\(spec)'")
+            exit(64)
+        }
+        audioDelaySwitches.append(AudioDelaySwitchRequest(
+            milliseconds: ms,
+            delayMilliseconds: parts.count == 2 ? (Int(parts[1]) ?? 20_000) : 20_000))
+    }
+    // AE#464 round 2: mount with `autoplay = false`, the shape of a host that owns transport.
+    let pausedMount = takeFlag("--paused", from: &rest)
+    // #460: `--reload-applying <key>=<value>`, repeatable, with one shared delay. The delay is a
+    // separate flag rather than teletext's `@ms` suffix because a header value can carry an `@`.
+    // Default +20 s for the same reason the teletext switch uses it: the correction has to land on
+    // a session that is already playing.
+    var optionChanges: [LoadOptionChange] = []
+    while let spec = takeStringFlag("--reload-applying", from: &rest) {
+        guard let eq = spec.firstIndex(of: "=") else {
+            print("ERROR: --reload-applying expects <key>=<value>, got '\(spec)'")
+            exit(64)
+        }
+        let key = String(spec[..<eq]).trimmingCharacters(in: .whitespaces)
+        let value = String(spec[spec.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+        if key.hasPrefix("header.") {
+            optionChanges.append(.header(name: String(key.dropFirst("header.".count)), value: value))
+        } else if key == "audio-bridge" {
+            guard let mode = AudioBridgeMode(rawValue: value) else {
+                print("ERROR: --reload-applying audio-bridge takes \(AudioBridgeMode.allCases.map(\.rawValue).joined(separator: "|")), got '\(value)'")
+                exit(64)
+            }
+            optionChanges.append(.audioBridgeMode(mode))
+        } else if key == "preferred-audio" {
+            optionChanges.append(.preferredAudioLanguages(
+                value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }))
+        } else if key == "decode-path" {
+            guard let path = DecodePath(rawValue: value) else {
+                print("ERROR: --reload-applying decode-path takes \(DecodePath.allCases.map(\.rawValue).joined(separator: "|")), got '\(value)'")
+                exit(64)
+            }
+            optionChanges.append(.decodePath(path))
+        } else if key == "is-live" {
+            guard let flag = Bool(value) else {
+                print("ERROR: --reload-applying is-live takes true|false, got '\(value)'")
+                exit(64)
+            }
+            optionChanges.append(.isLive(flag))
+        } else {
+            print("ERROR: --reload-applying key '\(key)' is not one of header.<Name>, audio-bridge, preferred-audio, decode-path, is-live")
+            exit(64)
+        }
+    }
+    let optionCorrectionDelay = takeIntFlag("--reload-applying-at", from: &rest) ?? 20_000
+    let optionCorrection: LoadOptionCorrectionRequest? = optionChanges.isEmpty
+        ? nil
+        : LoadOptionCorrectionRequest(changes: optionChanges, delayMilliseconds: optionCorrectionDelay)
     // AE#363: LoadOptions.httpHeaders, repeatable as `--header "Name: Value"`. Header-enforcing
     // origins (IPTV STB profiles, Referer-locked CDNs) had no CLI harness at all, so neither the
     // AVPlayer bypass nor the ingest reader could be driven against one from here.
@@ -642,14 +769,21 @@ if first == "play" {
                  censusThresholdMB: censusThresholdMB, censusHz: censusHz, frameTimes: frameTimes, pictureProbe: pictureProbe, sidecars: sidecars,
                  audioSwitch: audioSwitch,
                  teletextPage: teletextPage, teletextSwitch: teletextSwitch,
+                 audioDelayMs: audioDelayMs, audioDelaySwitches: audioDelaySwitches,
+                 pausedMount: pausedMount,
+                 optionCorrection: optionCorrection,
                  sequentialOrigin: sequentialOrigin, maxConcurrentRequests: maxConcurrentRequests,
                  declaredDuration: declaredDuration,
-                 httpHeaders: playHeaders))
+                 httpHeaders: playHeaders,
+                 deinterlaceFieldRate: playFieldRate,
+                 assertDolbyVision: playAssertDV))
 }
 
 if ["probe", "serve", "validate", "swdecode", "extract", "audio", "customio"].contains(first) {
     var rest = Array(args.dropFirst(2))
     let noDV = takeFlag("--no-dv", from: &rest)
+    // AE#455: opt-in P8.1-as-P5 routing, which only has an effect alongside --no-dv.
+    let forceDV = takeFlag("--force-dv", from: &rest)
     let framesOverride = takeIntFlag("--frames", from: &rest)
     let atSeconds = takeDoubleFlag("--at", from: &rest) ?? 60.0
     let extractLoops = takeIntFlag("--loops", from: &rest) ?? 1
@@ -675,6 +809,23 @@ if ["probe", "serve", "validate", "swdecode", "extract", "audio", "customio"].co
     // AE#445 round 3: a positive control for the reporter's own shape. removeFirst puts an
     // ingest-side Data carry back on the delivery path (bounded count, unbounded backing store);
     // subdata is the same carry re-based, i.e. the fix. Default none measures the engine alone.
+    // AE#460 follow-up: fire an in-place option correction on the live spool N seconds in, so the
+    // custom-source reload branch can be watched on a reader that has run past its base.
+    let customReloadAt = takeDoubleFlag("--reload-at", from: &rest)
+    // The non-conforming arm: a reader that reads `cancel()` as terminal, which is what a network
+    // reader's in-flight-request cancel becomes. Contract says unblock only; this measures the cost
+    // of the other reading rather than leaving it to be discovered on a host.
+    let customCancelLatches = takeFlag("--cancel-latches", from: &rest)
+    // AE#461 follow-up: drive the decode-path correction on a CUSTOM source. `--reload-at`'s own
+    // correction (an httpHeaders probe) is inert on this shape by design, so it measures the rebuild
+    // and cannot measure this field; this one is the field.
+    let customReloadDecodePath: DecodePath? = takeStringFlag("--reload-decode-path", from: &rest).flatMap { value in
+        guard let path = DecodePath(rawValue: value) else {
+            print("ERROR: --reload-decode-path takes \(DecodePath.allCases.map(\.rawValue).joined(separator: "|")), got '\(value)'")
+            exit(64)
+        }
+        return path
+    }
     let customHostCarry = takeStringFlag("--host-carry", from: &rest) ?? "none"
     guard let customCarryTrim = HostCarryTrim(rawValue: customHostCarry) else {
         print("ERROR: --host-carry expects none|removeFirst|subdata, got '\(customHostCarry)'")
@@ -692,6 +843,10 @@ if ["probe", "serve", "validate", "swdecode", "extract", "audio", "customio"].co
     let throttleKbps = takeIntFlag("--throttle-kbps", from: &rest)
     // --start-position: anchor the first producer at a resume position like load(startPosition:) (#99); serve only.
     let startPosition = takeDoubleFlag("--start-position", from: &rest)
+    // AE#464: park the server with an audio offset already in the muxer, so the delivered offset can
+    // be read straight off the segments (ffprobe the audio and video first-packet PTS) instead of
+    // being judged by ear.
+    let serveAudioDelayMs = takeIntFlag("--audio-delay", from: &rest) ?? 0
     rejectStrayFlags(rest, subcommand: first)
     guard let urlArg = rest.first else {
         print("ERROR: \(first) requires a <url> argument")
@@ -709,10 +864,11 @@ if ["probe", "serve", "validate", "swdecode", "extract", "audio", "customio"].co
     case "probe":
         exit(runProbe(url: url))
     case "serve":
-        runServe(url: url, dvModeAvailable: dvModeAvailable, nativeSubsIndex: nativeSubsIndex,
-                 startPosition: startPosition)
+        runServe(url: url, dvModeAvailable: dvModeAvailable, forceDVWithoutDisplay: forceDV,
+                 nativeSubsIndex: nativeSubsIndex, startPosition: startPosition,
+                 audioDelayMs: serveAudioDelayMs)
     case "validate":
-        exit(runValidate(url: url, dvModeAvailable: dvModeAvailable))
+        exit(runValidate(url: url, dvModeAvailable: dvModeAvailable, forceDVWithoutDisplay: forceDV))
     case "swdecode":
         exit(runSWDecode(url: url, maxPackets: framesOverride ?? 100))
     case "extract":
@@ -731,9 +887,11 @@ if ["probe", "serve", "validate", "swdecode", "extract", "audio", "customio"].co
                                     dvrWindow: customDvrWindow, reportsSize: customReportsSize,
                                     wraps: !customNoWrap, mallocCensus: customMallocCensus,
                                     foundationReader: customFoundationReader,
-                                    carryTrim: customCarryTrim))
+                                    carryTrim: customCarryTrim, reloadAt: customReloadAt,
+                                    cancelLatches: customCancelLatches,
+                                    reloadDecodePath: customReloadDecodePath))
         }
-        exit(runCustomIO(path: urlArg, inMemory: inMemory, forwardOnly: forwardOnly, audioOnly: audioOnlyFlag, reload: reloadFlag, switchAudio: switchAudioFlag, selectSubs: selectSubsFlag, extract: extractFlag, audioIndex: customAudioIndex))
+        exit(runCustomIO(path: urlArg, inMemory: inMemory, forwardOnly: forwardOnly, audioOnly: audioOnlyFlag, reload: reloadFlag, switchAudio: switchAudioFlag, selectSubs: selectSubsFlag, extract: extractFlag, audioIndex: customAudioIndex, reloadDecodePath: customReloadDecodePath))
     default:
         printUsage()
         exit(64)

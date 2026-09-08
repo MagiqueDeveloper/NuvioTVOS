@@ -27,6 +27,13 @@ final class NuvioSyncManager: ObservableObject {
     static private(set) var catalogSettingsSyncDiagnostic = "not pulled"
     static private(set) var accountSyncDiagnostic = "not started"
 
+    nonisolated static func mergeHomeCatalogItems(
+        local: [[String: Any]],
+        remote: [[String: Any]]
+    ) -> [[String: Any]] {
+        NuvioAPIClient.mergeHomeCatalogItems(local: local, remote: remote)
+    }
+
     /// True from sign-in until the first profile pull has been applied (or the
     /// pull fails), so the who's-watching screen can wait for real profile
     /// names instead of rendering local stubs.
@@ -375,6 +382,16 @@ final class NuvioSyncManager: ObservableObject {
         guard AuthConfig.isConfigured, authManager?.isAuthenticated == true else { return }
         profileSyncError = nil
         isPullingAccountProfiles = true
+        schedulePull(force: true)
+    }
+
+    /// Forces an immediate pull from the backend/website, bypassing the minimum
+    /// refresh interval floor (used by Clear Cache).
+    func forcePull() {
+        guard AuthConfig.isConfigured, authManager?.isAuthenticated == true else { return }
+        if let key = currentSyncKey() {
+            lastCompletedPullAt.removeValue(forKey: key)
+        }
         schedulePull(force: true)
     }
 
@@ -1827,6 +1844,9 @@ enum ContinueWatchingSyncMapper {
 /// Translates between tvOS player/playback settings and Android TV / mobile `player_settings`.
 enum PlayerSettingsSyncMapper {
     static let featureKey = "player_settings"
+    static let streamAutoPlayModeRemoteKey = "stream_auto_play_mode"
+    static let smartStreamUseTopResultRemoteKey = "smart_stream_use_top_result"
+    static let smartStreamSelectionRemoteKey = "smart_stream_selection"
 
     /// Mobile owns the complete shared player feature. Preserve any tv-only
     /// fields only when mobile does not already define the same key.
@@ -1842,6 +1862,33 @@ enum PlayerSettingsSyncMapper {
         var merged = existing
         for (key, value) in owned { merged[key] = value }
         return merged
+    }
+
+    /// Translates tvOS "Use Top Result" / "Auto Select Stream" into cross-platform wire format
+    /// (`"FIRST_STREAM"` / `"MANUAL"` / `"REGEX_MATCH"`).
+    static func autoPlayModeToWire(useTopResult: Bool, smartSelection: Bool, existingWireMode: String?) -> String {
+        if useTopResult && smartSelection {
+            return "FIRST_STREAM"
+        }
+        if existingWireMode?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "REGEX_MATCH" {
+            return "REGEX_MATCH"
+        }
+        return "MANUAL"
+    }
+
+    /// Translates cross-platform `"stream_auto_play_mode"` into tvOS flags.
+    static func autoPlayModeFromWire(_ wire: String?) -> (useTopResult: Bool, smartSelection: Bool)? {
+        guard let mode = wire?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(), !mode.isEmpty else {
+            return nil
+        }
+        switch mode {
+        case "FIRST_STREAM":
+            return (useTopResult: true, smartSelection: true)
+        case "MANUAL", "REGEX_MATCH":
+            return (useTopResult: false, smartSelection: false)
+        default:
+            return nil
+        }
     }
 
     static let remoteToLocalKeyMappings: [(remote: String, local: String)] = [
@@ -1861,7 +1908,8 @@ enum PlayerSettingsSyncMapper {
         ("frame_rate_matching", SettingsKey.frameRateMatching),
         ("player_show_pip", SettingsKey.playerShowPiP),
         ("player_show_episodes", SettingsKey.playerShowEpisodes),
-        ("player_show_sources", SettingsKey.playerShowSources)
+        ("player_show_sources", SettingsKey.playerShowSources),
+        ("player_show_subtitles", SettingsKey.playerShowSubtitles)
     ]
 
     static let localToRemoteKeyMappings: [(local: String, remote: String)] = [
@@ -1880,8 +1928,115 @@ enum PlayerSettingsSyncMapper {
         (SettingsKey.frameRateMatching, "frame_rate_matching"),
         (SettingsKey.playerShowPiP, "player_show_pip"),
         (SettingsKey.playerShowEpisodes, "player_show_episodes"),
-        (SettingsKey.playerShowSources, "player_show_sources")
+        (SettingsKey.playerShowSources, "player_show_sources"),
+        (SettingsKey.playerShowSubtitles, "player_show_subtitles")
     ]
+
+    static func exportPayload(
+        localProfileId: String,
+        existing: [String: Any]?,
+        encodeValue: (Any) -> [String: Any]?
+    ) -> [String: Any] {
+        let defaults = ProfileSettings.store(for: localProfileId)
+        let feature = existing ?? [:]
+        var owned: [String: Any] = [:]
+        for (localKey, remoteKey) in localToRemoteKeyMappings {
+            guard let value = defaults.object(forKey: localKey),
+                  let encoded = encodeValue(value) else {
+                continue
+            }
+            owned[remoteKey] = encoded
+        }
+
+        // Cross-platform sync for "Auto-play first source" (Android TV, mobile, desktop, web, tvOS).
+        let useTopResult = (defaults.object(forKey: SettingsKey.smartStreamUseTopResult) as? Bool) ?? false
+        let smartSelection = (defaults.object(forKey: SettingsKey.smartStreamSelection) as? Bool) ?? false
+        let existingWireMode: String? = {
+            if let dict = feature[streamAutoPlayModeRemoteKey] as? [String: Any] {
+                return dict["value"] as? String
+            }
+            return feature[streamAutoPlayModeRemoteKey] as? String
+        }()
+
+        let wireMode = autoPlayModeToWire(
+            useTopResult: useTopResult,
+            smartSelection: smartSelection,
+            existingWireMode: existingWireMode
+        )
+        if let encodedMode = encodeValue(wireMode) {
+            owned[streamAutoPlayModeRemoteKey] = encodedMode
+        }
+        if let encodedTopResult = encodeValue(useTopResult && smartSelection) {
+            owned[smartStreamUseTopResultRemoteKey] = encodedTopResult
+        }
+
+        return overlayOwnedSettings(feature, with: owned)
+    }
+
+    static func importPayload(
+        _ remote: [String: Any]?,
+        localProfileId: String,
+        decodeValue: ([String: Any]) -> Any?
+    ) {
+        guard let remote, !remote.isEmpty else { return }
+        let defaults = ProfileSettings.store(for: localProfileId)
+
+        for (remoteKey, localKey) in remoteToLocalKeyMappings {
+            guard let rawRemote = remote[remoteKey] else { continue }
+            if let encoded = rawRemote as? [String: Any],
+               let value = decodeValue(encoded) {
+                defaults.set(value, forKey: localKey)
+            } else if let value = rawRemote as? String {
+                defaults.set(value, forKey: localKey)
+            } else if let value = rawRemote as? Bool {
+                defaults.set(value, forKey: localKey)
+            } else if let value = rawRemote as? Int {
+                defaults.set(value, forKey: localKey)
+            } else if let value = (rawRemote as? NSNumber)?.intValue {
+                defaults.set(value, forKey: localKey)
+            }
+        }
+
+        // Cross-platform sync for "Auto-play first source" / "Use Top Result"
+        // Check "stream_auto_play_mode" first (used by Android TV, mobile, desktop, web).
+        let rawAutoPlayMode: String? = {
+            if let dict = remote[streamAutoPlayModeRemoteKey] as? [String: Any] {
+                return (decodeValue(dict) as? String) ?? (dict["value"] as? String)
+            }
+            return remote[streamAutoPlayModeRemoteKey] as? String
+        }()
+
+        if let translated = autoPlayModeFromWire(rawAutoPlayMode) {
+            defaults.set(translated.useTopResult, forKey: SettingsKey.smartStreamUseTopResult)
+            if translated.smartSelection {
+                defaults.set(true, forKey: SettingsKey.smartStreamSelection)
+            } else {
+                let remoteHasExplicitSmartSelection: Bool = {
+                    if let raw = remote[smartStreamSelectionRemoteKey] {
+                        if let dict = raw as? [String: Any] {
+                            return (decodeValue(dict) as? Bool) ?? (dict["value"] as? Bool) ?? false
+                        }
+                        return (raw as? Bool) ?? false
+                    }
+                    return false
+                }()
+                if !remoteHasExplicitSmartSelection {
+                    defaults.set(false, forKey: SettingsKey.smartStreamSelection)
+                }
+            }
+        } else if let rawTopResult = remote[smartStreamUseTopResultRemoteKey] {
+            let useTop: Bool = {
+                if let dict = rawTopResult as? [String: Any] {
+                    return (decodeValue(dict) as? Bool) ?? (dict["value"] as? Bool) ?? false
+                }
+                return (rawTopResult as? Bool) ?? false
+            }()
+            defaults.set(useTop, forKey: SettingsKey.smartStreamUseTopResult)
+            if useTop {
+                defaults.set(true, forKey: SettingsKey.smartStreamSelection)
+            }
+        }
+    }
 }
 
 /// Translates between tvOS MDBList integration settings and Android TV / mobile `mdblist_settings`.
@@ -2270,7 +2425,7 @@ fileprivate final class NuvioAPIClient {
         return rows.first?["settings_json"] as? [String: Any]
     }
 
-    private static func mergeHomeCatalogItems(
+    nonisolated static func mergeHomeCatalogItems(
         local: [[String: Any]],
         remote: [[String: Any]]
     ) -> [[String: Any]] {
@@ -2280,17 +2435,33 @@ fileprivate final class NuvioAPIClient {
             guard !key.isEmpty, remoteByKey[key] == nil else { continue }
             remoteByKey[key] = item
         }
-        return local.map { item in
-            guard let remoteItem = remoteByKey[homeCatalogItemKey(item)] else { return item }
-            var merged = remoteItem
-            for (key, value) in item {
+
+        var result: [[String: Any]] = []
+        var seenKeys = Set<String>()
+
+        for item in local {
+            let key = homeCatalogItemKey(item)
+            guard !key.isEmpty, seenKeys.insert(key).inserted else { continue }
+            var merged = remoteByKey[key] ?? item
+            for (k, v) in item {
                 // tvOS has no custom-title editor; preserve a title authored on
                 // Android instead of replacing it with the local empty default.
-                if key == "custom_title", (value as? String)?.isEmpty == true { continue }
-                merged[key] = value
+                if k == "custom_title", (v as? String)?.isEmpty == true { continue }
+                merged[k] = v
             }
-            return merged
+            merged["order"] = result.count
+            result.append(merged)
         }
+
+        for item in remote {
+            let key = homeCatalogItemKey(item)
+            guard !key.isEmpty, seenKeys.insert(key).inserted else { continue }
+            var preserved = item
+            preserved["order"] = result.count
+            result.append(preserved)
+        }
+
+        return result
     }
 
     private static func homeCatalogItemKey(_ item: [String: Any]) -> String {
@@ -3181,11 +3352,10 @@ fileprivate final class NuvioAPIClient {
         putString(AndroidDebridKey.preferred, preferredId)
 
         let anyKey = !torbox.isEmpty || !premiumize.isEmpty || !realDebrid.isEmpty
-        putBool(AndroidDebridKey.enabled, anyKey)
-        // Preserve Android's cloud toggle when present; default on when we have keys.
-        if feature[AndroidDebridKey.cloudLibrary] == nil {
-            putBool(AndroidDebridKey.cloudLibrary, anyKey)
-        }
+        let debridEnabled = (defaults.object(forKey: SettingsKey.debridEnabled) as? Bool) ?? anyKey
+        let cloudLibraryEnabled = (defaults.object(forKey: SettingsKey.cloudLibraryEnabled) as? Bool) ?? anyKey
+        putBool(AndroidDebridKey.enabled, debridEnabled)
+        putBool(AndroidDebridKey.cloudLibrary, cloudLibraryEnabled)
 
         return feature
     }
@@ -3206,6 +3376,30 @@ fileprivate final class NuvioAPIClient {
                 }
             }
             return nil
+        }
+
+        func boolValue(_ keys: [String]) -> Bool? {
+            for key in keys {
+                if let encoded = remote[key] as? [String: Any],
+                   let value = Self.decodeSettingValue(encoded) as? Bool {
+                    return value
+                }
+                if let value = remote[key] as? Bool {
+                    return value
+                }
+                if let string = remote[key] as? String {
+                    if string.lowercased() == "true" { return true }
+                    if string.lowercased() == "false" { return false }
+                }
+            }
+            return nil
+        }
+
+        if let enabled = boolValue([AndroidDebridKey.enabled, "debrid_enabled"]) {
+            defaults.set(enabled, forKey: SettingsKey.debridEnabled)
+        }
+        if let cloudEnabled = boolValue([AndroidDebridKey.cloudLibrary, "debrid_cloud_library_enabled", "cloud_library_enabled"]) {
+            defaults.set(cloudEnabled, forKey: SettingsKey.cloudLibraryEnabled)
         }
 
         if let torbox = stringValue([AndroidDebridKey.torbox, AndroidDebridKey.torboxPrefixed]) {
@@ -3291,38 +3485,19 @@ fileprivate final class NuvioAPIClient {
         localProfileId: String,
         existing: [String: Any]?
     ) -> [String: Any] {
-        let defaults = ProfileSettings.store(for: localProfileId)
-        let feature = existing ?? [:]
-        var owned: [String: Any] = [:]
-        for (localKey, remoteKey) in PlayerSettingsSyncMapper.localToRemoteKeyMappings {
-            guard let value = defaults.object(forKey: localKey),
-                  let encoded = Self.encodeSettingValue(value) else {
-                continue
-            }
-            owned[remoteKey] = encoded
-        }
-        return PlayerSettingsSyncMapper.overlayOwnedSettings(feature, with: owned)
+        PlayerSettingsSyncMapper.exportPayload(
+            localProfileId: localProfileId,
+            existing: existing,
+            encodeValue: Self.encodeSettingValue
+        )
     }
 
     private func importPlayerSettings(_ remote: [String: Any]?, localProfileId: String) {
-        guard let remote, !remote.isEmpty else { return }
-        let defaults = ProfileSettings.store(for: localProfileId)
-
-        for (remoteKey, localKey) in PlayerSettingsSyncMapper.remoteToLocalKeyMappings {
-            guard let rawRemote = remote[remoteKey] else { continue }
-            if let encoded = rawRemote as? [String: Any],
-               let value = Self.decodeSettingValue(encoded) {
-                defaults.set(value, forKey: localKey)
-            } else if let value = rawRemote as? String {
-                defaults.set(value, forKey: localKey)
-            } else if let value = rawRemote as? Bool {
-                defaults.set(value, forKey: localKey)
-            } else if let value = rawRemote as? Int {
-                defaults.set(value, forKey: localKey)
-            } else if let value = (rawRemote as? NSNumber)?.intValue {
-                defaults.set(value, forKey: localKey)
-            }
-        }
+        PlayerSettingsSyncMapper.importPayload(
+            remote,
+            localProfileId: localProfileId,
+            decodeValue: Self.decodeSettingValue
+        )
     }
 
     private func exportContinueWatchingSettings(

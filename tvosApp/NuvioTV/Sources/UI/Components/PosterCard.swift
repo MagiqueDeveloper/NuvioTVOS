@@ -274,9 +274,22 @@ struct PosterCard: View {
                     isFocused = true
                 }
             }
+            .onChange(of: shouldRequestInitialFocus) { _, shouldRequest in
+                if shouldRequest {
+                    guard !didRequestInitialFocus else { return }
+                    didRequestInitialFocus = true
+                    onInitialFocusRequested?()
+                    DispatchQueue.main.async {
+                        isFocused = true
+                    }
+                } else {
+                    didRequestInitialFocus = false
+                }
+            }
             // The row cell takes the full (landscape) width so neighbouring
             // cards are pushed aside rather than overlapped, while the focusable
             // surface stays portrait-width — keeping up/down navigation aligned.
+            .frame(width: layoutWidth, height: totalCardHeight, alignment: .topLeading)
             .frame(width: cardWidth, height: totalCardHeight, alignment: .topLeading)
             // Critically damped — no overshoot when expanding to landscape on Home.
             .animation(
@@ -991,7 +1004,7 @@ private struct TrailerPreviewPlayer: View {
             applySoundPreference(soundEnabled)
         }
         .onReceive(
-            NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)
+            NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime).receive(on: RunLoop.main)
         ) { notification in
             guard let item = notification.object as? AVPlayerItem,
                   item == player.currentItem else {
@@ -1178,6 +1191,16 @@ struct PosterGridCard: View {
             didRequestInitialFocus = true
             onInitialFocusRequested?()
             DispatchQueue.main.async { focused = true }
+        }
+        .onChange(of: shouldRequestInitialFocus) { _, shouldRequest in
+            if shouldRequest {
+                guard !didRequestInitialFocus else { return }
+                didRequestInitialFocus = true
+                onInitialFocusRequested?()
+                DispatchQueue.main.async { focused = true }
+            } else {
+                didRequestInitialFocus = false
+            }
         }
         .animation(
             smoothFocus ? .spring(response: 0.28, dampingFraction: 0.75) : nil,
@@ -1683,20 +1706,22 @@ actor PosterArtworkCache {
         cache.removeAllObjects()
     }
 
-    /// Memory + on-disk poster artwork. Used by Settings → Clear Cache.
-    func purgeAll() async {
-        cache.removeAllObjects()
-        inFlight.values.forEach { $0.cancel() }
-        inFlight.removeAll()
-        await PosterDiskCache.shared.purge()
+    static func clearAllArtwork() async {
+        await shared.purge()
+        await PosterDiskCache.shared.clear()
+        posterURLSession.configuration.urlCache?.removeAllCachedResponses()
+        URLCache.shared.removeAllCachedResponses()
+    }
+
+    func updateMemoryCache(_ image: UIImage, forKey key: NSString) {
+        cache.setObject(image, forKey: key, cost: image.decodedByteCost)
     }
 
     func image(for url: URL, maxPixelSize: Int) async -> UIImage? {
         let boundedPixelSize = min(max(maxPixelSize, 160), 1400)
         let key = "\(url.absoluteString)#\(boundedPixelSize)" as NSString
-        let volatile = PosterArtworkCachePolicy.isVolatile(url)
 
-        if !volatile, let cached = cache.object(forKey: key) {
+        if let cached = cache.object(forKey: key) {
             return cached
         }
 
@@ -1704,19 +1729,35 @@ actor PosterArtworkCache {
             return await task.value
         }
 
+        let isVolatile = PosterArtworkCachePolicy.isVolatile(url)
+
         let task = Task.detached(priority: .utility) { () -> UIImage? in
-            // Disk before network, like Coil. The bytes are keyed by URL alone,
+            // Disk before network (Stale-While-Revalidate). The bytes are keyed by URL alone,
             // so one stored poster serves every size a card asks for.
-            if !volatile, let stored = await PosterDiskCache.shared.data(for: url),
+            if let stored = await PosterDiskCache.shared.data(for: url),
                let image = await PosterDecodeLimiter.shared.image(
-                   from: stored,
+                   from: stored.data,
                    maxPixelSize: boundedPixelSize
                ) {
+                // If it's a dynamic/volatile rating poster and the disk cache is stale (> 24h),
+                // silently revalidate in the background to refresh rating badges without blocking UI.
+                if isVolatile && !stored.isFresh {
+                    Task.detached(priority: .background) {
+                        guard let freshData = await downloadPosterData(url: url) else { return }
+                        await PosterDiskCache.shared.store(freshData, for: url)
+                        if let freshImage = await PosterDecodeLimiter.shared.image(
+                            from: freshData,
+                            maxPixelSize: boundedPixelSize
+                        ) {
+                            await PosterArtworkCache.shared.updateMemoryCache(freshImage, forKey: key)
+                        }
+                    }
+                }
                 return image
             }
 
-            guard let data = await downloadPosterData(url: url, revalidate: volatile) else { return nil }
-            if !volatile { await PosterDiskCache.shared.store(data, for: url) }
+            guard let data = await downloadPosterData(url: url) else { return nil }
+            await PosterDiskCache.shared.store(data, for: url)
             return await PosterDecodeLimiter.shared.image(
                 from: data,
                 maxPixelSize: boundedPixelSize
@@ -1727,7 +1768,7 @@ actor PosterArtworkCache {
         let image = await task.value
         inFlight[key as String] = nil
 
-        if let image, !volatile {
+        if let image {
             cache.setObject(image, forKey: key, cost: image.decodedByteCost)
         }
         return image
@@ -1785,7 +1826,7 @@ private actor PosterDecodeLimiter {
 /// also re-triggers every slow generation, which is why the same Home looks
 /// worse on Apple TV than on Android for identical add-ons. Stored raw and
 /// keyed by URL alone — decoding happens per card, at that card's size.
-private actor PosterDiskCache {
+actor PosterDiskCache {
     static let shared = PosterDiskCache()
 
     private let directory: URL
@@ -1806,14 +1847,17 @@ private actor PosterDiskCache {
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    func data(for url: URL) -> Data? {
+    func data(for url: URL) -> (data: Data, isFresh: Bool)? {
         let file = fileURL(for: url)
-        guard let attributes = try? fileManager.attributesOfItem(atPath: file.path),
-              let modified = attributes[.modificationDate] as? Date,
-              PosterDiskCacheFreshness.isFresh(modified: modified, now: Date(), ttl: Self.freshnessTTL) else {
+        guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else {
             return nil
         }
-        return try? Data(contentsOf: file, options: .mappedIfSafe)
+        guard let attributes = try? fileManager.attributesOfItem(atPath: file.path),
+              let modified = attributes[.modificationDate] as? Date else {
+            return (data, false)
+        }
+        let fresh = PosterDiskCacheFreshness.isFresh(modified: modified, now: Date(), ttl: Self.freshnessTTL)
+        return (data, fresh)
     }
 
     func store(_ data: Data, for url: URL) {
@@ -1823,18 +1867,6 @@ private actor PosterDiskCache {
         guard bytesWrittenSinceTrim >= trimInterval else { return }
         bytesWrittenSinceTrim = 0
         trim()
-    }
-
-    func purge() {
-        guard let files = try? fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        ) else { return }
-        for file in files {
-            try? fileManager.removeItem(at: file)
-        }
-        bytesWrittenSinceTrim = 0
-        posterURLSession.configuration.urlCache?.removeAllCachedResponses()
     }
 
     private func fileURL(for url: URL) -> URL {
@@ -1868,6 +1900,17 @@ private actor PosterDiskCache {
             try? fileManager.removeItem(at: entry.url)
             total -= entry.size
         }
+    }
+
+    func clear() {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        for file in files {
+            try? fileManager.removeItem(at: file)
+        }
+        bytesWrittenSinceTrim = 0
     }
 }
 
@@ -2060,7 +2103,7 @@ struct WatchedCheckmarkBadge: View {
             .task(id: refreshTaskIdentity) {
                 await refresh()
             }
-            .onReceive(NotificationCenter.default.publisher(for: WatchedStore.changedNotification)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: WatchedStore.changedNotification).receive(on: RunLoop.main)) { _ in
                 // Re-key the SwiftUI task instead of starting an untracked Task.
                 // Store sync and view recreation can otherwise overlap refreshes,
                 // allowing an older result to overwrite a newer watched state.

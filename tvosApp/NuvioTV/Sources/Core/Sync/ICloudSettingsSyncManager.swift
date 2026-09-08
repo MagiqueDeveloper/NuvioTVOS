@@ -48,6 +48,7 @@ final class ICloudSettingsSyncManager: ObservableObject {
             let previous = isEnabled
             UserDefaults.standard.set(newValue, forKey: SettingsKey.iCloudSyncEnabled)
             if newValue && !previous {
+                start()
                 syncNow()
             }
         }
@@ -55,7 +56,7 @@ final class ICloudSettingsSyncManager: ObservableObject {
 
     /// Starts observing iCloud and local UserDefaults changes.
     func start() {
-        guard !didStart else { return }
+        guard isEnabled, !didStart else { return }
         didStart = true
 
         let center = NotificationCenter.default

@@ -168,6 +168,11 @@ enum TmdbDetailsService {
     private static let localizedDetailsCache = TmdbLocalizedDetailsCache()
     private static let findCache = TmdbFindCache()
 
+    static func clearCache() async {
+        await findCache.clear()
+        await localizedDetailsCache.clear()
+    }
+
     private static func data(for url: URL, timeout: TimeInterval = 10) async throws -> (Data, URLResponse) {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
@@ -1289,6 +1294,11 @@ private actor TmdbFindCache {
         }
         return result
     }
+
+    func clear() {
+        values.removeAll()
+        inFlight.removeAll()
+    }
 }
 
 private actor TmdbLocalizedDetailsCache {
@@ -1300,6 +1310,10 @@ private actor TmdbLocalizedDetailsCache {
 
     func insert(_ value: TmdbLocalizedDetailsResponse, for key: String) {
         values[key] = value
+    }
+
+    func clear() {
+        values.removeAll()
     }
 }
 

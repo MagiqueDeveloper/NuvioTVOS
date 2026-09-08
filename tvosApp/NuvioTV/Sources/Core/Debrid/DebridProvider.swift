@@ -32,6 +32,18 @@ enum DebridProviderKind: String, CaseIterable {
         }
     }
 
+    /// Short 2-letter provider badge matching Android TV / iOS ("TB", "RD", "PM").
+    var shortName: String {
+        switch self {
+        case .torbox: return "TB"
+        case .realDebrid: return "RD"
+        case .premiumize: return "PM"
+        case .allDebrid: return "AD"
+        case .debridLink: return "DL"
+        case .none: return ""
+        }
+    }
+
     /// Android TV `debrid_settings.preferred_resolver_provider_id` values.
     var androidProviderId: String? {
         switch self {

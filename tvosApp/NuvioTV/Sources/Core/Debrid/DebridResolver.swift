@@ -16,10 +16,11 @@ struct DebridResolver {
         DebridProviderKind(settingsValue: store.string(forKey: SettingsKey.debridProvider))
     }
 
-    /// Whether resolution is possible at all (a provider with a backend is
-    /// selected and a key is present). Lets callers skip the work entirely.
+    /// Whether resolution is possible at all (the user enabled debrid link resolving,
+    /// a provider with a backend is selected, and a key is present).
     var isEnabled: Bool {
-        provider(for: selectedKind) != nil && !apiKey.isEmpty
+        let debridEnabled = store.object(forKey: SettingsKey.debridEnabled) as? Bool ?? true
+        return debridEnabled && provider(for: selectedKind) != nil && !apiKey.isEmpty
     }
 
     private var apiKey: String {

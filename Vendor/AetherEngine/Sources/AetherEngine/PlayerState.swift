@@ -75,6 +75,81 @@ public enum VideoRoute: String, Sendable, Equatable {
     }
 }
 
+/// How the session's audio reaches the renderer, as a typed fact (AE#462).
+///
+/// The reason this exists is `.droppedNoPipeline`. A source whose audio can neither stream-copy into
+/// fMP4 nor go through the bridge plays video-only: `state` reaches `.playing`, nothing failed by the
+/// error taxonomy's lights, and before this the only account was a log line. A host with a fallback
+/// ladder (a server-side transcode, a second player) could reconstruct the drop from a non-empty
+/// `audioTracks` paired with a nil `activeAudioDecoder`, which was an undocumented pairing of two
+/// publishers that broke in both directions: it read as a drop where a probe had merely failed to list
+/// the tracks, and it read as healthy on the software path, whose label is built from the probe rather
+/// than from the decoder that was opened. `audioDelivery` is the fact itself, published where the
+/// pipelines decide it. **A host with a ladder should demote on `.droppedNoPipeline`**, the way it
+/// demotes on `PlaybackErrorKind.audioBridgeProducedNoOutput`, which is the same user outcome reached
+/// through a bridge that WAS built and then decoded nothing.
+///
+/// Not a `PlaybackErrorKind`: `publishError` makes a failure terminal by moving `state` to `.error`,
+/// and `errorInfo` is cleared by the state's own move away from it. Video-only playback is neither
+/// terminal nor an error for every host, so carrying it there would break the invariant that ties
+/// those two publishers together.
+///
+/// Derived from `playbackBackend`, the session's effective options and the live pipeline's own
+/// classification, never assigned on its own, so it cannot drift from the running session (the
+/// `videoRoute` arrangement, #321). Raw values are API, like `PlaybackErrorKind`'s.
+///
+/// The pair with `activeAudioDecoder` still holds and is now honest on both paths: that publisher
+/// names the pipeline for a human, this one classifies it for a ladder.
+public enum AudioDelivery: String, Sendable, Equatable, CaseIterable {
+    /// No session: pre-load, or torn down.
+    case none
+    /// The source carries no audio stream (or none was selected). Silence is the source's, not the
+    /// engine's, and no ladder rung can change it.
+    case noAudioInSource
+    /// The source's audio bitstream is muxed into fMP4 unchanged: Atmos, DTS-HD and every other
+    /// bitstream reach the renderer exactly as authored.
+    case streamCopy
+    /// The audio is decoded and re-encoded (FLAC or E-AC-3) for the fMP4 pipeline, because its codec
+    /// is not fMP4-legal or AVPlayer rejects it there. Lossless for the bed channels; object metadata
+    /// in a TrueHD-MAT or JOC bitstream does not survive the PCM intermediate.
+    case bridged
+    /// libavcodec decodes the audio and the engine renders it itself (the software path and the
+    /// software audio-only host).
+    case decoded
+    /// The source HAS audio and none of it could be delivered: no libavcodec decoder for it, or the
+    /// bridge could not be built or could not write its header. The session plays video-only and
+    /// silently. This is the one value a fallback ladder acts on.
+    case droppedNoPipeline
+    /// AVFoundation owns the audio: the remote-HLS bypass and the native audio-only host both hand
+    /// the source to AVPlayer, which does its own media selection. The engine has no pipeline of its
+    /// own to classify and does not guess on AVFoundation's behalf.
+    case playerManaged
+
+    /// Single point where a backend, the session's remote-HLS bit and a pipeline's own classification
+    /// become one published fact.
+    ///
+    /// The routing bits alone can never produce `.droppedNoPipeline`: the drop is only ever reported
+    /// by the pipeline that dropped, about itself.
+    static func derive(backend: PlaybackBackend,
+                       nativeRemoteHLS: Bool,
+                       loopbackSession: AudioDelivery?,
+                       softwareHost: AudioDelivery?,
+                       audioOnlyHost: AudioDelivery?) -> AudioDelivery {
+        switch backend {
+        case .none, .aether:
+            return .none
+        case .native:
+            // The bypass has no HLSVideoEngine to ask, and a leftover fact from the session before a
+            // reroute must not answer for it.
+            return nativeRemoteHLS ? .playerManaged : (loopbackSession ?? .none)
+        case .software:
+            return softwareHost ?? .none
+        case .audio:
+            return audioOnlyHost ?? .none
+        }
+    }
+}
+
 /// What playback is doing right now, as one observable (#85). Derived from `state`, `isBuffering`,
 /// `isSeeking`, and the reader network phase, so it can never desync from them. Observe `$playbackPhase`
 /// instead of stitching `state == .loading` + `$isBuffering` + `$isSeeking` together, and instead of
@@ -164,6 +239,49 @@ public struct DisplayCapabilities: Sendable, Equatable {
         self.supportsHDR10 = supportsHDR10
         self.supportsHLG = supportsHLG
     }
+
+    /// AE#493: what a display that engages EDR on demand can present, where no per-mode table exists.
+    ///
+    /// `AVPlayer.availableHDRModes` is `API_UNAVAILABLE(macos)`, so the macOS branch had nothing to read
+    /// for the per-mode split and returned a table of `false`. That is not the same as unknown: it is an
+    /// assertion, and `effectiveVideoFormat` clamps a PQ base against it, which downgraded every HDR10
+    /// and HLG source to SDR before playback started (reported on a 16" XDR, macOS 26).
+    ///
+    /// Eligibility is the honest answer for the two that only need EDR: HDR10 and HLG are a transfer
+    /// function, and a display AVFoundation calls eligible for HDR playback presents both. It is
+    /// deliberately NOT the answer for Dolby Vision. Eligibility proves EDR, not that AVFoundation will
+    /// accept a given DV variant on this display, and a refusal surfaces as -11868 with nothing playing.
+    /// DV therefore stays unclaimed here and belongs to a host assertion instead, where the claim is made
+    /// by whoever knows the hardware.
+    static func onDemandEDRDisplay(hdrEligible: Bool) -> DisplayCapabilities {
+        DisplayCapabilities(
+            supportsHDR: hdrEligible,
+            supportsDolbyVision: false,
+            supportsHDR10: hdrEligible,
+            supportsHLG: hdrEligible)
+    }
+
+    /// AE#493 / AE#459: the capability a host asserts, because this one cannot be observed.
+    ///
+    /// `AVPlayer.availableHDRModes` is `API_UNAVAILABLE(macos)`, so a Mac has no per-mode table to read,
+    /// and eligibility deliberately does not stand in for one: it proves EDR, not that AVFoundation will
+    /// accept a Dolby Vision variant on this display. Whoever knows the hardware is the host, so the claim
+    /// is the host's (`LoadOptions.panelPresentsDolbyVision`).
+    ///
+    /// An assertion only ever ADDS. A display the system already reports DV-capable is not un-asserted by
+    /// a `false`, so the flag can claim a capability and never hide one. `supportsHDR` rides along because
+    /// Dolby Vision is an HDR format: a display presenting DV presents HDR, and without that term the
+    /// session would build a DV master for a route `displaySupportsHDR == false` had already sent
+    /// media-direct. HDR10 and HLG are NOT implied; that every DV television also takes HDR10 is a fact
+    /// about the market, not an entailment of the claim.
+    func assertingDolbyVision(_ asserted: Bool) -> DisplayCapabilities {
+        guard asserted else { return self }
+        return DisplayCapabilities(
+            supportsHDR: true,
+            supportsDolbyVision: true,
+            supportsHDR10: supportsHDR10,
+            supportsHLG: supportsHLG)
+    }
 }
 
 /// Deinterlacer selection for the software-decode path (interlaced MPEG-2 / VC-1 / MPEG-4, and
@@ -205,6 +323,17 @@ public enum LiveJoinProfile: Sendable, Equatable {
 }
 
 /// Options for `AetherEngine.load(url:options:)`. All flags default to safe values.
+/// Which playback host serves a session's video (#461). See `LoadOptions.preferredDecodePath`.
+public enum DecodePath: String, Sendable, Equatable, CaseIterable {
+    /// The engine routes: codec support, the VideoToolbox capability probe, declared interlace,
+    /// source seekability. The default, and right for every session that does not have evidence
+    /// the engine cannot have.
+    case automatic
+    /// Serve this source through `SoftwarePlaybackHost`, whatever the routing concluded. Scoped to
+    /// the session; it does not touch any other session on the shared engine.
+    case software
+}
+
 public struct LoadOptions: Sendable, Equatable {
     /// Diagnostic lever: omit BT.2020 / transfer / YCbCr matrix from AVDisplayCriteria so AVPlayer re-reads color from the bitstream. Default off.
     public var omitCriteriaColorExtensions: Bool
@@ -216,11 +345,60 @@ public struct LoadOptions: Sendable, Equatable {
     /// Diagnostic lever: force dvh1 codec tags + master playlist regardless of display capability. OFF by default: non-DV displays route DV through the media playlist (no master) so AVPlayer auto-tonemaps the HEVC base layer (only path that avoids AVFoundationErrorDomain -11868 on tvOS 26). AetherEngine#4.
     public var keepDvh1TagWithoutDV: Bool
 
+    /// AE#455, EXPERIMENTAL, default OFF. On a display with no Dolby Vision of its own, serve a Profile 8.1
+    /// source the way a Profile 5 source is served: `dvh1` sample entry, container `dvcC` rewritten to
+    /// profile 5 / compatibility 0, `CODECS="dvh1.05.LL"`. AVPlayer then runs its own DV composition and
+    /// applies the per-frame RPU to the pixels before they reach the panel, instead of handing the panel the
+    /// static-metadata HDR10 base layer it hands it today.
+    ///
+    /// The bitstream is untouched: only the container's claim about it changes. What makes that survivable is
+    /// that a P8.1 RPU already carries the mapping out of its HDR10 base layer, so the composer does not need
+    /// the container to tell it what the base layer is. What makes it experimental is that this is not what
+    /// the profile field means, and a tvOS build that reads the base layer's colorimetry from the profile
+    /// rather than the RPU would render IPT out of YCbCr (the green/violet cast of AE#4 and AE#176).
+    ///
+    /// Ignored when the display does support Dolby Vision, and applies to HEVC Profile 8.1 only. Reported by
+    /// DrHurt against a Samsung HDR10 panel.
+    public var forceDolbyVisionOnNonDVDisplay: Bool
+
     /// Mirror of `AVDisplayManager.isDisplayCriteriaMatchingEnabled`. Default `true`. When `false`, engine routes HDR sources through the media playlist (auto-tonemap path) because AVKit cannot switch the panel.
     public var matchContentEnabled: Bool
 
-    /// Mirror of `UIScreen.main.currentEDRHeadroom > 1`. Default `false` (conservative SDR branch). When in HDR, master playlist VIDEO-RANGE=PQ and SUPPLEMENTAL-CODECS=dvh1 are accepted upfront for the HDR10-to-DV upgrade.
+    /// Host assertion that the panel is presenting HDR right now. Default `false` (conservative SDR branch).
+    /// When set, master playlist VIDEO-RANGE=PQ and SUPPLEMENTAL-CODECS=dvh1 are accepted upfront for the
+    /// HDR10-to-DV upgrade.
+    ///
+    /// AE#459: this is an OR term over the engine's own readout, not a replacement for it, and it counts on
+    /// every platform rather than only where the host suppresses display criteria. The readout it backs up
+    /// is `UIScreen.currentEDRHeadroom > 1`, which answers only around a dynamic-range TRANSITION: an Apple
+    /// TV whose output format is locked to HDR never makes one, so it reads as an SDR panel forever, and on
+    /// tvOS 27 the property has stopped answering at all on at least one box. A host that knows the panel is
+    /// in HDR (a user setting, its own probe) says so here.
     public var panelIsInHDRMode: Bool
+
+    /// Host assertion that this display presents Dolby Vision. Default `false`. Not a capability the engine
+    /// observed, a claim the host makes about hardware it knows.
+    ///
+    /// AE#493: `AVPlayer.availableHDRModes` is `API_UNAVAILABLE(macos)`, so a Mac has no per-mode capability
+    /// table at all, and `eligibleForHDRPlayback` answers HDR10 and HLG but cannot answer this one. Setting
+    /// it serves the source the way a DV display is served (`dvh1` sample entry, `SUPPLEMENTAL-CODECS`,
+    /// master playlist) and publishes `videoFormat = .dolbyVision`. HDR support rides along because DV is an
+    /// HDR format; HDR10 and HLG capability are not implied.
+    ///
+    /// A wrong claim is cheap on the class of failure the engine classifies, and that class is not the whole
+    /// space. AVPlayer refusing the master with -11868 / -11848 fails the ITEM, and the engine falls back to
+    /// the media playlist once, in place, at the same position, where AVPlayer tone-maps the base layer;
+    /// correctable mid-session through `reloadAtCurrentPosition(applying:)`. Two measured limits on that:
+    /// on macOS the wrong claim was not refused at all (a DV master on a Mac with no DV display plays,
+    /// macOS 26.5.2), and on tvOS an asserted Profile 8.1 reaches the DV packaging (`dvvC` in the sample
+    /// entry plus `SUPPLEMENTAL-CODECS`), which on an HDR10-only panel was measured to reach `readyToPlay`,
+    /// play for a second or two and then stall with -15628 in the item's error log (2026-05-26, AE#4). A
+    /// stall is not an item failure, so the fallback above does not fire for it.
+    ///
+    /// Asserting also turns `forceDolbyVisionOnNonDVDisplay` off, since that one is gated on the display
+    /// having no DV. On tvOS, DV composition on a panel without Dolby Vision is what that flag is for, and
+    /// its packaging is the one device-verified on that panel class (AE#455).
+    public var panelPresentsDolbyVision: Bool
 
     /// Bridge encoder for codecs that cannot stream-copy into fMP4 (TrueHD, DTS, DTS-HD MA, MP3, Opus, EAC3-from-MKV-without-dec3-extradata).
     ///
@@ -455,6 +633,17 @@ public struct LoadOptions: Sendable, Equatable {
     /// waypoint; the host resumes later with `play()`. Same declared-vs-real family as #122/#123 (#124).
     public var autoplay: Bool = true
 
+    /// AE#464: audio presentation offset for this session, in seconds. Positive presents audio
+    /// LATER relative to video, negative earlier. Default 0.
+    ///
+    /// A lip-sync correction belongs to the viewer's chain, not to the file, so this is the value a
+    /// host sets once per setup and the engine honours for the session (and across the rebuilds a
+    /// session makes on its own). Applied on `.loopback` and `.software`; on `.remoteBypass` and
+    /// audio-only sessions the engine does not hold the timestamps and says so rather than pretending.
+    /// Clamped to `AudioDelayPolicy.maxAbsSeconds`. Correct it mid-session with
+    /// `AetherEngine.setAudioDelay(_:)`, which is the same value seen from the other end.
+    public var audioDelaySeconds: Double = 0
+
     /// Teletext caption page for `dvb_teletext` subtitle decode. nil (default) = libzvbi auto-detect
     /// (`txt_page=subtitle`); an explicit page (e.g. 801 for AU) targets channels whose caption page
     /// libzvbi does not flag as a subtitle page. Only affects teletext streams (#107).
@@ -469,6 +658,33 @@ public struct LoadOptions: Sendable, Equatable {
     /// (50/60 fps), `.frame` keeps frame rate. Ignored by the software fallback (always frame
     /// rate). See `DeinterlaceFieldRate`.
     public var deinterlaceFieldRate: DeinterlaceFieldRate = .field
+
+    /// AE#461: which decode path this session runs on when the host needs to overrule the engine's
+    /// own routing. `.automatic` (default) leaves the routing alone. `.software` serves the source
+    /// through `SoftwarePlaybackHost` (libavcodec / dav1d) whatever the routing concluded, scoped to
+    /// this session, and without costing the source anything: seeks, the mid-session audio switch and
+    /// the title switch all still work, unlike the forward-only reader that was previously the only
+    /// way onto that host.
+    ///
+    /// The lever exists because `VTCapabilityProbe.canHardwareDecode` FAILS OPEN by design (four
+    /// classes it cannot classify keep the native path), which is the right default and occasionally
+    /// wrong: if VideoToolbox then cannot build a decoder for what arrives, the item reaches
+    /// `readyToPlay` and renders nothing. In-band parameter sets (`hev1` / `avc1` with an empty
+    /// config record) are the class where the deciding evidence genuinely is not present at load
+    /// time, and a stream whose parameter sets turn undecodable mid-play has no other in-place
+    /// answer. Pair with `reloadAtCurrentPosition(applying:)` (#460) to correct a running session.
+    ///
+    /// One-way on purpose: there is no `.native`. Every route the engine sends to software it sends
+    /// there because the native path cannot serve it (AV1 without hardware decode, VP9, a
+    /// forward-only source, MVC carriage), so forcing native past those buys a black screen.
+    ///
+    /// `.software` does not suspend the guards downstream of the routing decision, and must not: a
+    /// source whose only signal is IPT-PQ-c2 (Dolby Vision HEVC P5, AV1 P10.0) still fails the load
+    /// with `dolbyVisionUnplayableOnSoftwarePath` rather than decoding as YCbCr and rendering
+    /// green/purple, and a demuxed-audio live source still fails rather than playing silent.
+    /// `nativeRemoteHLS` is a different route entirely (AVPlayer plays the remote playlist, nothing
+    /// is demuxed), so this has nothing to act on there and the engine says so in the log.
+    public var preferredDecodePath: DecodePath = .automatic
 
     /// ENGINE-INTERNAL: marks this load as a live REJOIN (`reloadAtCurrentPosition`). Not settable from the public initializer. When true, the native load path skips its explicit initial seek so AVPlayer picks edge-minus-holdback (see `LiveReloadPolicy`); without it the reloaded item can wedge in `waitingToPlay` against Jellyfin's re-served backlog. Meaningful only when `isLive` is true.
     var isLiveRejoin: Bool = false
@@ -485,8 +701,10 @@ public struct LoadOptions: Sendable, Equatable {
         suppressDisplayCriteria: Bool = false,
         httpHeaders: [String: String] = [:],
         keepDvh1TagWithoutDV: Bool = false,
+        forceDolbyVisionOnNonDVDisplay: Bool = false,
         matchContentEnabled: Bool = true,
         panelIsInHDRMode: Bool = false,
+        panelPresentsDolbyVision: Bool = false,
         audioBridgeMode: AudioBridgeMode = .surroundCompat,
         isLive: Bool = false,
         audioOnly: Bool = false,
@@ -513,15 +731,19 @@ public struct LoadOptions: Sendable, Equatable {
         forwardBufferSegments: Int? = nil,
         autoplay: Bool = true,
         teletextPage: Int? = nil,
+        audioDelaySeconds: Double = 0,
         deinterlaceMode: DeinterlaceMode = .auto,
-        deinterlaceFieldRate: DeinterlaceFieldRate = .field
+        deinterlaceFieldRate: DeinterlaceFieldRate = .field,
+        preferredDecodePath: DecodePath = .automatic
     ) {
         self.omitCriteriaColorExtensions = omitCriteriaColorExtensions
         self.suppressDisplayCriteria = suppressDisplayCriteria
         self.httpHeaders = httpHeaders
         self.keepDvh1TagWithoutDV = keepDvh1TagWithoutDV
+        self.forceDolbyVisionOnNonDVDisplay = forceDolbyVisionOnNonDVDisplay
         self.matchContentEnabled = matchContentEnabled
         self.panelIsInHDRMode = panelIsInHDRMode
+        self.panelPresentsDolbyVision = panelPresentsDolbyVision
         self.audioBridgeMode = audioBridgeMode
         self.isLive = isLive
         self.audioOnly = audioOnly
@@ -548,8 +770,10 @@ public struct LoadOptions: Sendable, Equatable {
         self.forwardBufferSegments = forwardBufferSegments
         self.autoplay = autoplay
         self.teletextPage = teletextPage
+        self.audioDelaySeconds = audioDelaySeconds
         self.deinterlaceMode = deinterlaceMode
         self.deinterlaceFieldRate = deinterlaceFieldRate
+        self.preferredDecodePath = preferredDecodePath
     }
 }
 
@@ -638,6 +862,11 @@ public struct SoftwareDecodeProbeResult: Sendable {
     public let firstFrameWidth: Int
     public let firstFrameHeight: Int
     public let firstError: String?
+    /// #407: presentation timestamps of the decoded pictures, in the order the decoder handed them
+    /// out. A healthy reordering stream produces a strictly ascending, evenly spaced ladder here; a
+    /// container that withheld its PTS and had one invented from decode order produces a sawtooth,
+    /// which is the one shape no packet-level or renderer-level counter can see.
+    public let frameTimesSeconds: [Double]
 
     public init(
         codecName: String,
@@ -652,8 +881,10 @@ public struct SoftwareDecodeProbeResult: Sendable {
         firstFramePixelFormat: String?,
         firstFrameWidth: Int,
         firstFrameHeight: Int,
-        firstError: String?
+        firstError: String?,
+        frameTimesSeconds: [Double] = []
     ) {
+        self.frameTimesSeconds = frameTimesSeconds
         self.codecName = codecName
         self.codecID = codecID
         self.width = width

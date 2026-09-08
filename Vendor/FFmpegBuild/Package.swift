@@ -1,8 +1,7 @@
 // swift-tools-version: 6.0
-// Nuvio fork of FFmpegBuild 2.4.3: frameworks/modules namespaced as AetherLib*
-// so they coexist in the same app binary with MPVKit's Libav* stack.
-// Upstream: https://github.com/superuser404notfound/FFmpegBuild/tree/2.4.3
-// Rebuild: re-run Vendor/namespace_ffmpegbuild.py after refreshing upstream xcframeworks.
+// Nuvio pin of FFmpegBuild 3.0.0: upstream-namespaced AetherLib* frameworks/modules
+// coexist in the same app binary with MPVKit's Libav* stack.
+// Upstream: https://github.com/superuser404notfound/FFmpegBuild/tree/3.0.0
 
 import PackageDescription
 

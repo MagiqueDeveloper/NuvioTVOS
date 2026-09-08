@@ -178,12 +178,15 @@ enum ExternalPlayer: String, CaseIterable, Identifiable {
     }
 
     /// The URL-scheme deep link that hands `streamURL` to this player, or `nil`
-    /// for the built-in player (which plays in-app). Infuse supports multi-`sub=`;
+    /// for the built-in player (which plays in-app). Infuse supports multi-`sub=`,
+    /// `filename=` (for accurate metadata/title scraping), and `position=`.
     /// VLC takes the first subtitle. Source is percent-encoded so query separators
     /// in the stream URL survive.
     func launchURL(
         for streamURL: URL,
+        filename: String? = nil,
         subtitleURLs: [URL] = [],
+        position: Double? = nil,
         successURL: URL? = nil,
         errorURL: URL? = nil
     ) -> URL? {
@@ -195,11 +198,19 @@ enum ExternalPlayer: String, CaseIterable, Identifiable {
         let encodedSubs = subtitleURLs.compactMap {
             $0.absoluteString.addingPercentEncoding(withAllowedCharacters: .externalPlayerURLValue)
         }
+        let encodedFilename = filename?.addingPercentEncoding(withAllowedCharacters: .externalPlayerURLValue)
+
         switch self {
         case .builtIn:
             return nil
         case .infuse:
             var query = "infuse://x-callback-url/play?url=\(encoded)"
+            if let encodedFilename, !encodedFilename.isEmpty {
+                query += "&filename=\(encodedFilename)"
+            }
+            if let position, position > 0 {
+                query += "&position=\(Int(position))"
+            }
             for sub in encodedSubs.prefix(8) {
                 query += "&sub=\(sub)"
             }
@@ -219,6 +230,9 @@ enum ExternalPlayer: String, CaseIterable, Identifiable {
             }
             return URL(string: query)
         case .outplayer:
+            if let encodedFilename, !encodedFilename.isEmpty {
+                return URL(string: "outplayer://x-callback-url/play?url=\(encoded)&filename=\(encodedFilename)")
+            }
             return URL(string: "outplayer://\(encoded)")
         case .nplayer:
             // nPlayer uses nplayer-http / nplayer-https for remote progressive URLs.
@@ -232,8 +246,106 @@ enum ExternalPlayer: String, CaseIterable, Identifiable {
             }
             return URL(string: "nplayer-\(encoded)")
         case .vidhub:
-            return URL(string: "vidhub://play?url=\(encoded)")
+            var query = "vidhub://play?url=\(encoded)"
+            if let encodedFilename, !encodedFilename.isEmpty {
+                query += "&filename=\(encodedFilename)"
+            }
+            if let position, position > 0 {
+                query += "&position=\(Int(position))"
+            }
+            if let first = encodedSubs.first {
+                query += "&sub=\(first)"
+            }
+            return URL(string: query)
         }
+    }
+
+    /// Builds a sanitized, scraper-friendly media filename for external players
+    /// (e.g. Infuse, Outplayer, VidHub) to enable accurate metadata matching (TMDb / TheTVDB)
+    /// and prevent displaying raw stream hashes/tokens.
+    static func mediaFilename(
+        meta: NuvioMeta?,
+        season: Int? = nil,
+        episode: Int? = nil,
+        episodeTitle: String? = nil,
+        streamFilename: String? = nil
+    ) -> String? {
+        if let meta {
+            let cleanTitle = sanitizeFilename(meta.name)
+            guard !cleanTitle.isEmpty else {
+                return fallbackFilename(streamFilename: streamFilename)
+            }
+
+            if meta.isSeries || (season != nil && episode != nil) {
+                let s = season.map { String(format: "%02d", max(1, $0)) } ?? "01"
+                let e = episode.map { String(format: "%02d", max(1, $0)) } ?? "01"
+                var epTitle = episodeTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let t = epTitle {
+                    let cleaned = sanitizeFilename(t)
+                    if cleaned.isEmpty
+                        || cleaned.caseInsensitiveCompare(cleanTitle) == .orderedSame
+                        || cleaned.range(of: #"^S\d{1,2}\s*[·•xX-]\s*E\d{1,2}$"#, options: .regularExpression) != nil
+                        || cleaned.range(of: #"^Season\s+\d+"#, options: [.regularExpression, .caseInsensitive]) != nil
+                        || cleaned.range(of: #"^Episode\s+\d+"#, options: [.regularExpression, .caseInsensitive]) != nil {
+                        epTitle = nil
+                    } else {
+                        // Strip leading "S01E01 - " or "S1 · E1 · " if already embedded in subtitle
+                        let stripped = cleaned.replacingOccurrences(
+                            of: #"^(?:S\d{1,2}\s*[·•xX-]\s*E\d{1,2}\s*[·•-]\s*)+"#,
+                            with: "",
+                            options: .regularExpression
+                        ).trimmingCharacters(in: .whitespacesAndNewlines)
+                        epTitle = stripped.isEmpty ? nil : stripped
+                    }
+                }
+                if let epTitle, !epTitle.isEmpty {
+                    return "\(cleanTitle) - S\(s)E\(e) - \(epTitle).mp4"
+                } else {
+                    return "\(cleanTitle) - S\(s)E\(e).mp4"
+                }
+            } else {
+                var year = meta.year
+                if year == nil, let releaseInfo = meta.releaseInfo,
+                   let match = releaseInfo.range(of: #"\b(19\d\d|20\d\d)\b"#, options: .regularExpression) {
+                    year = Int(releaseInfo[match])
+                }
+                if year == nil, let released = meta.released,
+                   let match = released.range(of: #"\b(19\d\d|20\d\d)\b"#, options: .regularExpression) {
+                    year = Int(released[match])
+                }
+                if let year {
+                    return "\(cleanTitle) (\(year)).mp4"
+                } else {
+                    return "\(cleanTitle).mp4"
+                }
+            }
+        }
+        return fallbackFilename(streamFilename: streamFilename)
+    }
+
+    private static func fallbackFilename(streamFilename: String?) -> String? {
+        guard let streamFilename = streamFilename?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !streamFilename.isEmpty else {
+            return nil
+        }
+        let cleaned = sanitizeFilename(streamFilename)
+        guard !cleaned.isEmpty else { return nil }
+        if cleaned.contains(".") {
+            return cleaned
+        }
+        return "\(cleaned).mp4"
+    }
+
+    private static func sanitizeFilename(_ name: String) -> String {
+        var s = name
+        s = s.replacingOccurrences(of: ":", with: " -")
+        s = s.replacingOccurrences(of: "/", with: "-")
+        s = s.replacingOccurrences(of: "\\", with: "-")
+        let forbidden = CharacterSet(charactersIn: "*?\"<>|")
+        s = s.unicodeScalars.filter { !forbidden.contains($0) }.map(String.init).joined()
+        while s.contains("  ") { s = s.replacingOccurrences(of: "  ", with: " ") }
+        while s.contains("- -") { s = s.replacingOccurrences(of: "- -", with: "-") }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

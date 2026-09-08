@@ -53,22 +53,21 @@ Download the latest Apple TV `.ipa` from [Releases](https://github.com/bobsupra/
 ## Latest tvOS Beta
 
 <!-- BEGIN LATEST_BETA -->
-**Beta 3.3.3** is the latest tvOS release.
+**Beta 3.3.4** is the latest tvOS release.
 
-[Quick download (.ipa)](https://github.com/bobsupra/NuvioTVOS/releases/download/tvos-beta-3.3.3/NuvioTV-3.3.3-unsigned-release.ipa) · [Read the release notes](https://github.com/bobsupra/NuvioTVOS/releases/tag/tvos-beta-3.3.3) · [Report a bug or suggest an idea](https://github.com/bobsupra/NuvioTVOS/issues/new/choose)
+[Quick download (.ipa)](https://github.com/bobsupra/NuvioTVOS/releases/download/tvos-beta-3.3.4/NuvioTV-3.3.4-unsigned-release.ipa) · [Read the release notes](https://github.com/bobsupra/NuvioTVOS/releases/tag/tvos-beta-3.3.4) · [Report a bug or suggest an idea](https://github.com/bobsupra/NuvioTVOS/issues/new/choose)
 <!-- END LATEST_BETA -->
 
 > 🎉 **Thank you for 100+ GitHub Stars!** A huge thank you to everyone in the community for supporting NuvioTVOS and helping us reach 100+ stars!
 
 The IPA requires a compatible tvOS development or sideloading signing workflow before installation.
 
-### New in Beta 3.3.3
+### New in Beta 3.3.4
 
-- **Modular Home Screen Architecture:** Deconstructs the monolithic Home view into clean SwiftUI components (`CollectionFolderBrowseView`, `TVCatalogRow`) with smooth folder browsing and focus protection.
-- **High-Speed TMDB Metadata Caching:** Multi-tier cache and background prefetching in `TmdbDetailsService.swift` eliminates loading spinners and delay when navigating details.
-- **Comprehensive Stream Quality & Codec Detection:** Overhauled `StreamQualityTags.swift` with deep pattern matching for AV1, HEVC, Dolby Vision, Atmos, TrueHD, DTS-HD, and channel layouts (backed by 500+ unit tests).
-- **Reorganized Integration Settings:** Redesigned `SettingsView.swift` grouping debrid providers and tracking services with improved Apple TV remote focus interaction.
-- **Details Screen Polish:** Fixes episode numbering and season grouping across third-party addon catalogs with fluid poster card focus animations.
+- **Fixed Issues #52 – #62:** Addresses community-reported bugs and feature requests including watch progress resume (#52), addon name display toggle (#53), cache clearing options (#54), Cinemeta layout persistence (#56), subtitle discovery (#57), home scroll smoothness (#58), debrid stream link resolution (#59), and sleep while paused (#62).
+- **Native tvOS Search Keyboard & Dictation (#55, #60):** Integrates native Apple TV keyboard with Siri dictation support and fast focus navigation.
+- **Enhanced Subtitle Selector (#61):** In-player subtitle picker with track selection and timing offset adjustments.
+- **AetherEngine Diagnostics & Hardening:** Enhanced TLS handshakes, HLS origin relay, and software performance snapshot tracking.
 
 ### The new player
 

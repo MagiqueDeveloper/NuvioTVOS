@@ -178,6 +178,7 @@ enum SettingsKey {
     static let traktLibrarySourceMode = "nuvio.tv.settings.integrations.traktLibrarySourceMode"
     static let traktMoreLikeThisSource = "nuvio.tv.settings.integrations.traktMoreLikeThisSource"
     static let simklClientID = "nuvio.tv.settings.integrations.simklClientID"
+    static let simklPlanToWatchHomeCatalogs = "nuvio.tv.settings.integrations.simklPlanToWatchHomeCatalogs"
     static let tmdbEnabled = "nuvio.tv.settings.integrations.tmdbEnabled"
     static let tmdbApiKey = "nuvio.tv.settings.integrations.tmdbApiKey"
     static let tmdbLanguage = "nuvio.tv.settings.integrations.tmdbLanguage"
@@ -204,6 +205,8 @@ enum SettingsKey {
     static let mdbListUseAudience = "nuvio.tv.settings.integrations.mdbListUseAudience"
     static let debridProvider = "nuvio.tv.settings.integrations.debridProvider"
     static let debridApiKey = "nuvio.tv.settings.integrations.debridApiKey"
+    static let debridEnabled = "nuvio.tv.settings.integrations.debridEnabled"
+    static let cloudLibraryEnabled = "nuvio.tv.settings.integrations.cloudLibraryEnabled"
     /// Provider-specific device-flow tokens. Keeping them separate matches the
     /// Android TV debrid screen so multiple providers can stay linked.
     static let torboxAccessToken = "nuvio.tv.settings.integrations.torboxAccessToken"
@@ -222,6 +225,8 @@ enum SettingsKey {
     static let streamAddonManifestURL = "nuvio.tv.settings.integrations.streamAddonManifestURL"
     static let streamAddonManifestURLs = "nuvio.tv.settings.integrations.streamAddonManifestURLs"
     static let streamAddonManifestStates = "nuvio.tv.settings.integrations.streamAddonManifestStates"
+    static let cinemetaDisabled = "nuvio.tv.settings.integrations.cinemetaDisabled"
+    static let deletedLocalAddons = "nuvio.tv.settings.integrations.deletedLocalAddons"
     /// JSON server configurations and cached indexes for local media sources.
     /// Authentication secrets remain in Keychain.
     static let smbServers = "nuvio.tv.settings.integrations.smbServers"
@@ -267,6 +272,7 @@ enum SettingsKey {
     static let playerShowPiP = "nuvio.tv.settings.playback.showPiP"
     static let playerShowEpisodes = "nuvio.tv.settings.playback.showEpisodes"
     static let playerShowSources = "nuvio.tv.settings.playback.showSources"
+    static let playerShowSubtitles = "nuvio.tv.settings.playback.showSubtitles"
 
     static let fastNavigation = "nuvio.tv.settings.advanced.fastNavigation"
     static let smoothFocus = "nuvio.tv.settings.advanced.smoothFocus"
@@ -296,7 +302,7 @@ enum SettingsKey {
         traktContinueWatchingDaysCap, traktShowMetaComments,
         traktWatchProgressSource, watchProgressSourceChosenByUser,
         traktLibrarySourceMode, traktMoreLikeThisSource,
-        simklClientID, simklAccessToken,
+        simklClientID, simklAccessToken, simklPlanToWatchHomeCatalogs,
         tmdbEnabled, tmdbApiKey, tmdbLanguage,
         tmdbUseTrailers, tmdbUseArtwork, tmdbUseBasicInfo, tmdbUseDetails, tmdbUseCredits,
         tmdbUseProductions, tmdbUseNetworks, tmdbUseEpisodes, tmdbUseSeasonPosters,
@@ -304,7 +310,8 @@ enum SettingsKey {
         mdbListEnabled, mdbListApiKey, mdbListUseImdb, mdbListUseTmdb,
         mdbListUseTomatoes, mdbListUseMetacritic, mdbListUseTrakt,
         mdbListUseLetterboxd, mdbListUseAudience,
-        debridProvider, debridApiKey, torboxAccessToken, premiumizeAccessToken, realDebridAccessToken,
+        debridProvider, debridApiKey, debridEnabled, cloudLibraryEnabled,
+        torboxAccessToken, premiumizeAccessToken, realDebridAccessToken,
         aiSubtitlesEnabled, aiSubtitlesProvider, aiSubtitlesGeminiAPIKey, aiSubtitlesGeminiModel,
         aiSubtitlesOpenRouterModel,
         aiSubtitlesTargetLanguage, aiSubtitlesAutoSelect, aiSubtitlesStripHearingImpaired,
@@ -317,7 +324,7 @@ enum SettingsKey {
         subtitleLanguages, subtitleLanguage, subtitleLanguageSecondary, subtitleLanguageTertiary,
         forcedSubtitles, subtitleSize, frameRateMatching, networkCache, playbackTrackSelections,
         externalPlayerForwardSubtitles, assOverrideMode,
-        playerShowPiP, playerShowEpisodes, playerShowSources,
+        playerShowPiP, playerShowEpisodes, playerShowSources, playerShowSubtitles,
         fastNavigation, smoothFocus, playbackDiagnostics, playbackDebug, focusHighlighter
     ] + SubtitleStyleKey.all
 }
@@ -1065,7 +1072,8 @@ struct SettingsView: View {
                         // no longer locked to the first row.
                         if newValue == nil { detailVisited = true }
                     }
-                    .onChange(of: selectedCategory) { _, _ in
+                    .onChange(of: selectedCategory) { oldCat, newCat in
+                        TVHomeDebugTrace.log("settings.selectedCategory changed from \(oldCat.rawValue) to \(newCat.rawValue)")
                         // A newly opened category should lock to its first row again.
                         detailVisited = false
                     }
@@ -1155,6 +1163,12 @@ struct SettingsView: View {
         .background(Color.nuvioBackground(amoled: amoled, body: bodyColor).ignoresSafeArea())
         .animation(.easeOut(duration: 0.16), value: presentedLanguagePicker != nil)
         .animation(.easeInOut(duration: 0.18), value: presentedProfilePinMode != nil)
+        .onAppear {
+            TVHomeDebugTrace.log("settings.appear category=\(selectedCategory.rawValue)")
+        }
+        .onDisappear {
+            TVHomeDebugTrace.log("settings.disappear")
+        }
     }
 
     private var audioLanguageSelection: Binding<[String]> {
@@ -2780,7 +2794,7 @@ private struct LayoutDiscoverySettingsView: View {
     // Search is the only screen that currently hosts the full Discover surface.
     // Do not offer Home/Library as dead selections that merely hide Discover.
     private let discoverLocations = ["Search", "Off"]
-    private let searchStyles = ["Netflix", "Classic"]
+    private let searchStyles = ["Netflix", "Classic", "Native"]
     private let continueWatchingSorts = ["Default", "Streaming Style", "Separate Upcoming Row"]
 
     var body: some View {
@@ -2925,7 +2939,7 @@ private struct LayoutDiscoverySettingsView: View {
                     title: L10n.string("tvos_layout_search_style", fallback: "Search Style"),
                     subtitle: L10n.string(
                         "tvos_layout_search_style_subtitle",
-                        fallback: "Netflix keeps an on-screen keyboard up with a title list beside the posters; Classic uses the system keyboard over a full-width grid"
+                        fallback: "Netflix uses the built-in tvOS keyboard with a title list beside the posters; Classic uses the system keyboard over a full-width grid; Native uses the built-in tvOS single-row keyboard"
                     ),
                     selection: $searchStyle,
                     options: searchStyles,
@@ -3079,16 +3093,16 @@ private struct HeroCatalogSelectionRow: View {
         .padding(.top, 8)
         .animation(.easeInOut(duration: 0.2), value: selectionData)
         .onAppear { loadCatalogs() }
-        .onReceive(NotificationCenter.default.publisher(for: TVHomeCatalogOrder.changedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: TVHomeCatalogOrder.changedNotification).receive(on: RunLoop.main)) { _ in
             loadCatalogs()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NuvioSyncManager.addonOrderChangedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NuvioSyncManager.addonOrderChangedNotification).receive(on: RunLoop.main)) { _ in
             loadCatalogs()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NuvioSyncManager.homeContentSyncedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NuvioSyncManager.homeContentSyncedNotification).receive(on: RunLoop.main)) { _ in
             loadCatalogs()
         }
-        .onReceive(NotificationCenter.default.publisher(for: TVHomeCatalogOrder.snapshotChangedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: TVHomeCatalogOrder.snapshotChangedNotification).receive(on: RunLoop.main)) { _ in
             loadCatalogs()
         }
     }
@@ -3128,6 +3142,8 @@ private func layoutVisibleHomeCatalogRows() -> [TVHomeCatalogOrder.SnapshotRow] 
     let rows = TVHomeCatalogOrder.snapshotRows()
     let disabledAddonIDs = TVHomeCatalogOrder.disabledAddonIDs()
     let disabledAddonNames = TVHomeCatalogOrder.disabledAddonNames()
+    let cinemetaPrefix = "\(CinemetaCatalogRepository.cinemetaAddonId)_"
+    let isCinemetaActive = CinemetaCatalogRepository.isCinemetaEnabled
     let sourceRows = rows.filter { row in
         if let addonId = row.addonId, disabledAddonIDs.contains(addonId) {
             return false
@@ -3136,40 +3152,106 @@ private func layoutVisibleHomeCatalogRows() -> [TVHomeCatalogOrder.SnapshotRow] 
            disabledAddonNames.contains(TVHomeCatalogOrder.normalizedAddonSourceName(addonName)) {
             return false
         }
+        if !isCinemetaActive {
+            if row.addonId == CinemetaCatalogRepository.cinemetaAddonId { return false }
+            if row.settingsKey?.hasPrefix(cinemetaPrefix) == true { return false }
+            if ["movie_top", "series_top", "movie_rating", "series_rating"].contains(row.id) { return false }
+        }
+        let isSimklPlanActive = SimklSettingsStore.isPlanToWatchHomeCatalogsEnabled
+            && SimklRuntimeSession.authenticatedState() != nil
+        if !isSimklPlanActive {
+            if row.addonId == "simkl" { return false }
+            if row.settingsKey?.hasPrefix("simkl_") == true { return false }
+            if ["addon_simkl_movie_plantowatch", "addon_simkl_series_plantowatch", "simkl_plantowatch_movie", "simkl_plantowatch_series"].contains(row.id) { return false }
+        }
         return true
     }
-    let cinemetaPrefix = "\(CinemetaCatalogRepository.cinemetaAddonId)_"
-    guard CinemetaCatalogRepository.isCinemetaEnabled else {
-        return sourceRows.filter { !($0.settingsKey?.hasPrefix(cinemetaPrefix) ?? false) }
-    }
 
-    // Home normally records these rows after its catalog request completes.
-    // Restore their metadata here too, so enabling Cinemeta updates Layout
-    // immediately instead of waiting for the user to visit Home first.
-    let builtIns: [(id: String, title: String, type: String, catalogId: String)] = [
-        ("movie_top", "Popular - Movies", "movie", "top"),
-        ("series_top", "Popular - Series", "series", "top"),
-        ("movie_rating", "Top Rated - Movies", "movie", "imdbRating"),
-        ("series_rating", "Top Rated - Series", "series", "imdbRating")
-    ]
     var merged = sourceRows
-    let existingIDs = Set(sourceRows.map(\.id))
-    for builtIn in builtIns where !existingIDs.contains(builtIn.id) {
-        merged.append(
-            TVHomeCatalogOrder.SnapshotRow(
-                id: builtIn.id,
-                title: builtIn.title,
-                addonName: CinemetaCatalogRepository.cinemetaDisplayName,
-                addonId: nil,
-                contentType: builtIn.type,
-                catalogId: builtIn.catalogId,
-                settingsKey: TVHomeCatalogOrder.catalogSettingsKey(
-                    addonId: CinemetaCatalogRepository.cinemetaAddonId,
+    if isCinemetaActive {
+        // Home normally records these rows after its catalog request completes.
+        // Restore their metadata here too, so enabling Cinemeta updates Layout
+        // immediately instead of waiting for the user to visit Home first.
+        let builtIns: [(id: String, title: String, type: String, catalogId: String)] = [
+            ("movie_top", "Popular - Movies", "movie", "top"),
+            ("series_top", "Popular - Series", "series", "top"),
+            ("movie_rating", "Top Rated - Movies", "movie", "imdbRating"),
+            ("series_rating", "Top Rated - Series", "series", "imdbRating")
+        ]
+        let existingIDs = Set(sourceRows.map(\.id))
+        for builtIn in builtIns where !existingIDs.contains(builtIn.id) {
+            merged.append(
+                TVHomeCatalogOrder.SnapshotRow(
+                    id: builtIn.id,
+                    title: builtIn.title,
+                    addonName: CinemetaCatalogRepository.cinemetaDisplayName,
+                    addonId: nil,
                     contentType: builtIn.type,
-                    catalogId: builtIn.catalogId
+                    catalogId: builtIn.catalogId,
+                    settingsKey: TVHomeCatalogOrder.catalogSettingsKey(
+                        addonId: CinemetaCatalogRepository.cinemetaAddonId,
+                        contentType: builtIn.type,
+                        catalogId: builtIn.catalogId
+                    )
                 )
             )
-        )
+        }
+    }
+
+    if SimklSettingsStore.isPlanToWatchHomeCatalogsEnabled && SimklRuntimeSession.authenticatedState() != nil {
+        let simklBuiltIns: [(id: String, title: String, type: String, catalogId: String)] = [
+            ("addon_simkl_movie_plantowatch", "Plan to Watch", "movie", "plantowatch"),
+            ("addon_simkl_series_plantowatch", "Plan to Watch", "series", "plantowatch")
+        ]
+        let existingIDs = Set(merged.map(\.id))
+        let showType = ProfileSettings.current.object(forKey: SettingsKey.homeCatalogShowType) as? Bool ?? true
+        for row in simklBuiltIns where !existingIDs.contains(row.id) {
+            merged.append(
+                TVHomeCatalogOrder.SnapshotRow(
+                    id: row.id,
+                    title: TVHomeCatalogOrder.catalogDisplayTitle(
+                        row.title,
+                        contentType: row.type,
+                        showType: showType
+                    ),
+                    addonName: "Simkl",
+                    addonId: "simkl",
+                    contentType: row.type,
+                    catalogId: row.catalogId,
+                    settingsKey: TVHomeCatalogOrder.catalogSettingsKey(
+                        addonId: "simkl",
+                        contentType: row.type,
+                        catalogId: row.catalogId
+                    )
+                )
+            )
+        }
+    }
+
+    let orderKeys = TVHomeCatalogOrder.effectiveOrderKeys()
+    if !orderKeys.isEmpty {
+        var indexByKey: [String: Int] = [:]
+        for (idx, key) in orderKeys.enumerated() where indexByKey[key] == nil {
+            indexByKey[key] = idx
+        }
+        func rowOrderKeys(_ row: TVHomeCatalogOrder.SnapshotRow) -> [String] {
+            var keys = [row.id]
+            let normalized = TVHomeCatalogOrder.sectionOrderKey(row.id)
+            if normalized != row.id { keys.append(normalized) }
+            if let sk = row.settingsKey, !keys.contains(sk) { keys.append(sk) }
+            return keys
+        }
+        func bestIndex(_ row: TVHomeCatalogOrder.SnapshotRow) -> Int? {
+            for key in rowOrderKeys(row) {
+                if let idx = indexByKey[key] { return idx }
+            }
+            return nil
+        }
+        let known = merged.filter { bestIndex($0) != nil }.sorted {
+            (bestIndex($0) ?? 0) < (bestIndex($1) ?? 0)
+        }
+        let unknown = merged.filter { bestIndex($0) == nil }
+        merged = known + unknown
     }
     return merged
 }
@@ -3191,6 +3273,8 @@ private struct IntegrationSettingsView: View {
     @AppStorage(SettingsKey.mdbListApiKey) private var mdbListApiKey = ""
     @AppStorage(SettingsKey.debridProvider) private var debridProvider = "None"
     @AppStorage(SettingsKey.debridApiKey) private var debridApiKey = ""
+    @AppStorage(SettingsKey.debridEnabled) private var debridEnabled = true
+    @AppStorage(SettingsKey.cloudLibraryEnabled) private var cloudLibraryEnabled = true
     @AppStorage(SettingsKey.torboxAccessToken) private var torboxAccessToken = ""
     @AppStorage(SettingsKey.premiumizeAccessToken) private var premiumizeAccessToken = ""
     @AppStorage(SettingsKey.realDebridAccessToken) private var realDebridAccessToken = ""
@@ -3348,6 +3432,32 @@ private struct IntegrationSettingsView: View {
                     fallback: "Link providers used to resolve torrent streams"
                 )
             ) {
+                SettingsToggleRow(
+                    title: L10n.string("debrid_cloud_library", fallback: "Cloud library"),
+                    subtitle: L10n.string("debrid_cloud_library_description", fallback: "Browse and play files already in your connected accounts."),
+                    isOn: $cloudLibraryEnabled,
+                    accentColor: accentColor,
+                    enabled: hasAnyDebridConnected
+                )
+
+                SettingsToggleRow(
+                    title: L10n.string("debrid_enable_title", fallback: "Resolve playable links"),
+                    subtitle: L10n.string("debrid_enable_subtitle", fallback: "Ask a connected service for playable links when a result needs it. This may add the item to that service."),
+                    isOn: $debridEnabled,
+                    accentColor: accentColor,
+                    enabled: hasAnyDebridConnected
+                )
+
+                if debridEnabled && connectedProviders.count > 1 {
+                    SettingsChoiceRow(
+                        title: L10n.string("debrid_resolve_with", fallback: "Resolve with"),
+                        subtitle: L10n.string("debrid_resolve_with_description", fallback: "Choose which connected account handles playable links."),
+                        selection: $debridProvider,
+                        options: connectedProviders.map { $0.debridKind.rawValue },
+                        accentColor: accentColor
+                    )
+                }
+
                 SettingsActionRow(
                     title: L10n.string("tvos_settings_real_debrid", fallback: "Real-Debrid"),
                     subtitle: L10n.string(
@@ -3457,6 +3567,27 @@ private struct IntegrationSettingsView: View {
         .onChange(of: simklViewModel.mode) { _, mode in
             if mode == .connected { showingSimklLogin = false }
         }
+        .onChange(of: debridProvider) { _, newKind in
+            guard let kind = DebridProviderKind(rawValue: newKind) else { return }
+            switch kind {
+            case .torbox:
+                if !torboxAccessToken.isEmpty { debridApiKey = torboxAccessToken }
+            case .realDebrid:
+                if !realDebridAccessToken.isEmpty { debridApiKey = realDebridAccessToken }
+            case .premiumize:
+                if !premiumizeAccessToken.isEmpty { debridApiKey = premiumizeAccessToken }
+            default:
+                break
+            }
+        }
+    }
+
+    private var hasAnyDebridConnected: Bool {
+        !connectedProviders.isEmpty
+    }
+
+    private var connectedProviders: [DebridAccountProvider] {
+        DebridAccountProvider.allCases.filter { isConnected($0) }
     }
 
     private var tmdbHasApiKey: Bool {
@@ -5060,6 +5191,7 @@ private struct SimklConnectedSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(SettingsKey.amoled) private var amoled = false
     @AppStorage(SettingsKey.bodyColor) private var bodyColor = SettingsBackground.charcoal.rawValue
+    @AppStorage(SettingsKey.simklPlanToWatchHomeCatalogs) private var simklPlanToWatchHomeCatalogs = false
     @State private var showingDisconnectConfirmation = false
     @State private var showingHistoryTransferSources = false
     @State private var showingLibraryTransferSources = false
@@ -5162,6 +5294,16 @@ private struct SimklConnectedSettingsSheet: View {
                                 subtitle: L10n.string("tvos_settings_simkl_more_like_this_subtitle", fallback: "Choose where recommendations come from on detail pages"),
                                 selection: moreLikeThisSelection,
                                 options: TraktMoreLikeThisSource.allCases.map(\.label),
+                                accentColor: accentColor
+                            )
+
+                            SettingsToggleRow(
+                                title: L10n.string("tvos_settings_simkl_plan_to_watch_home", fallback: "Plan to Watch on Home"),
+                                subtitle: L10n.string(
+                                    "tvos_settings_simkl_plan_to_watch_home_subtitle",
+                                    fallback: "Add Plan to Watch Movies and Series as separate catalogs on Home"
+                                ),
+                                isOn: $simklPlanToWatchHomeCatalogs,
                                 accentColor: accentColor
                             )
                         }
@@ -5337,6 +5479,10 @@ private struct SimklConnectedSettingsSheet: View {
         .task {
             viewModel.reload()
             viewModel.loadConnectedData()
+        }
+        .onChange(of: simklPlanToWatchHomeCatalogs) { _, _ in
+            NotificationCenter.default.post(name: TVHomeCatalogOrder.changedNotification, object: nil)
+            NotificationCenter.default.post(name: TVHomeCatalogOrder.snapshotChangedNotification, object: nil)
         }
         .onChange(of: viewModel.mode) { _, mode in
             if mode != .connected { dismiss() }
@@ -5741,6 +5887,7 @@ private struct PlaybackSettingsView: View {
     @AppStorage(SettingsKey.playerShowPiP) private var playerShowPiP = true
     @AppStorage(SettingsKey.playerShowEpisodes) private var playerShowEpisodes = true
     @AppStorage(SettingsKey.playerShowSources) private var playerShowSources = true
+    @AppStorage(SettingsKey.playerShowSubtitles) private var playerShowSubtitles = true
 
     @State private var streamBadgeURL = ""
     @State private var streamBadgeImportError: String?
@@ -5870,6 +6017,16 @@ private struct PlaybackSettingsView: View {
                         fallback: "Show the alternate streams and sources button"
                     ),
                     isOn: $playerShowSources,
+                    accentColor: accentColor
+                )
+
+                SettingsToggleRow(
+                    title: L10n.string("tvos_settings_player_subtitles", fallback: "Subtitles Button"),
+                    subtitle: L10n.string(
+                        "tvos_settings_player_subtitles_subtitle",
+                        fallback: "Show the native subtitle selector button in player controls"
+                    ),
+                    isOn: $playerShowSubtitles,
                     accentColor: accentColor
                 )
 
@@ -6022,7 +6179,7 @@ private struct PlaybackSettingsView: View {
             }
 
         }
-        .onReceive(NotificationCenter.default.publisher(for: StreamBadgeSettingsStore.changedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: StreamBadgeSettingsStore.changedNotification).receive(on: RunLoop.main)) { _ in
             streamBadgeSettingsRevision &+= 1
         }
         .onAppear {
@@ -6831,7 +6988,7 @@ private struct AdvancedSettingsView: View {
     @State private var isSeedingTestHistory = false
     @State private var testHistoryStatus = ContinueWatchingTestData.status
     @State private var isClearingCache = false
-    @State private var cacheStatus = ""
+    @State private var clearedCacheStatus: String?
     @AppStorage(SettingsKey.focusHighlighter) private var focusHighlighter = false
     @AppStorage(SettingsKey.iCloudSyncEnabled) private var iCloudSyncEnabled = false
     @ObservedObject private var iCloudSyncManager = ICloudSettingsSyncManager.shared
@@ -6998,6 +7155,25 @@ private struct AdvancedSettingsView: View {
                 }
             }
 
+            SettingsGroup(
+                title: L10n.string("settings_cache_title", fallback: "Cache"),
+                subtitle: L10n.string(
+                    "settings_cache_subtitle",
+                    fallback: "Temporary poster artwork, catalog order, and row data"
+                )
+            ) {
+                SettingsActionRow(
+                    title: L10n.string("settings_clear_cache", fallback: "Clear Cache"),
+                    subtitle: L10n.string(
+                        "settings_clear_cache_description",
+                        fallback: "Keeps your settings and logins, but wipes cached posters, catalog order, and rows, then pulls fresh data from your account"
+                    ),
+                    value: cacheActionValue,
+                    accentColor: accentColor,
+                    action: clearCache
+                )
+            }
+
             SettingsGroup(title: L10n.string("subtitle_style_reset", fallback: "Reset"), subtitle: L10n.string("tvos_settings_clear_local_tvos_settings_saved_by_this_screen", fallback: "Clear local tvOS settings saved by this screen")) {
                 SettingsActionRow(
                     title: L10n.string("tvos_settings_reset_settings", fallback: "Reset Settings"),
@@ -7007,38 +7183,29 @@ private struct AdvancedSettingsView: View {
                     action: resetSettings
                 )
             }
+        }
+    }
 
-            SettingsGroup(
-                title: L10n.string("tvos_settings_cache_title", fallback: "Cache"),
-                subtitle: L10n.string(
-                    "tvos_settings_cache_subtitle",
-                    fallback: "Free stuck artwork and Home row data without changing your settings"
-                )
-            ) {
-                SettingsActionRow(
-                    title: L10n.string("tvos_settings_clear_cache", fallback: "Clear Cache"),
-                    subtitle: L10n.string(
-                        "tvos_settings_clear_cache_subtitle",
-                        fallback: "Keeps settings; clears posters, catalog order, and row positions, then pulls fresh Home data"
-                    ),
-                    value: isClearingCache
-                        ? L10n.string("tvos_settings_clear_cache_working", fallback: "Working…")
-                        : (cacheStatus.isEmpty
-                            ? L10n.string("tvos_settings_clear_cache_action", fallback: "Clear")
-                            : cacheStatus),
-                    accentColor: accentColor,
-                    action: {
-                        guard !isClearingCache else { return }
-                        isClearingCache = true
-                        cacheStatus = ""
-                        Task { @MainActor in
-                            await TVCacheClearing.clearAndRefresh()
-                            cacheStatus = L10n.string("tvos_settings_clear_cache_done", fallback: "Done")
-                            isClearingCache = false
-                        }
-                    }
-                )
-            }
+    private var cacheActionValue: String {
+        if isClearingCache {
+            return L10n.string("action_clearing", fallback: "Clearing…")
+        }
+        if let status = clearedCacheStatus {
+            return status
+        }
+        return L10n.string("action_clear", fallback: "Clear")
+    }
+
+    private func clearCache() {
+        guard !isClearingCache else { return }
+        isClearingCache = true
+        clearedCacheStatus = nil
+        Task { @MainActor in
+            await AppCacheManager.clearCache()
+            isClearingCache = false
+            clearedCacheStatus = L10n.string("action_cleared", fallback: "Cleared")
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            clearedCacheStatus = nil
         }
     }
 
@@ -7169,8 +7336,8 @@ private struct LicensesAttributionsSheet: View {
     private let playbackEntries: [LicenseEntry] = [
         LicenseEntry(
             id: "aetherengine",
-            title: "AetherEngine 6.57.0",
-            body: "Primary playback engine. Complete corresponding source and Nuvio's pinned changes: github.com/superuser404notfound/AetherEngine/tree/6.57.0 and the Vendor/AetherEngine directory in the NuvioTV source distribution.",
+            title: "AetherEngine 6.72.0",
+            body: "Primary playback engine. Complete corresponding source and Nuvio's pinned changes: github.com/superuser404notfound/AetherEngine/tree/6.72.0 and the Vendor/AetherEngine directory in the NuvioTV source distribution.",
             license: "LGPL-3.0 + App Store exception"
         ),
         LicenseEntry(
@@ -8347,7 +8514,7 @@ private struct AddonsSettingsSection: View {
     @AppStorage(SettingsKey.streamAddonManifestURLs) private var streamAddonManifestURLs = ""
     @AppStorage(SettingsKey.streamAddonManifestStates) private var streamAddonManifestStates = ""
     @State private var addonURLInput = ""
-    @State private var addons: [AddonItem] = AddonItem.defaults
+    @State private var addons: [AddonItem] = AddonsSettingsSection.initialLocalAddons()
     @State private var syncedAddons: [SyncedAddon] = []
 
     var body: some View {
@@ -8443,6 +8610,13 @@ private struct AddonsSettingsSection: View {
         } else {
             preferences.append(StreamAddonPreference(url: url.absoluteString, enabled: true))
         }
+        let cinemetaURL = "https://v3-cinemeta.strem.io/manifest.json"
+        if url.absoluteString.caseInsensitiveCompare(cinemetaURL) == .orderedSame {
+            CinemetaCatalogRepository.setCinemetaDisabled(false)
+            var deleted = Self.deletedLocalAddonIDs()
+            deleted.remove("cinemeta")
+            Self.setDeletedLocalAddonIDs(deleted)
+        }
 
         CinemetaCatalogRepository.setConfiguredStreamAddonPreferences(preferences)
         streamAddonManifestURL = ProfileSettings.current.string(forKey: SettingsKey.streamAddonManifestURL) ?? ""
@@ -8491,6 +8665,7 @@ private struct AddonsSettingsSection: View {
             return addon
         }
         syncedAddons = resolved
+        addons = Self.initialLocalAddons()
 
         for index in resolved.indices {
             guard !Task.isCancelled else { return }
@@ -8501,13 +8676,13 @@ private struct AddonsSettingsSection: View {
             syncedAddons = resolved
             if resolved[index].isEnabled,
                let addonID = manifest.id,
-               addonID != CinemetaCatalogRepository.cinemetaAddonId,
-               let rows = await resolvedHomeRows(
-                   manifest: manifest,
-                   manifestURL: resolved[index].url,
-                   addonID: addonID,
-                   addonName: resolved[index].name
-               ) {
+               addonID != CinemetaCatalogRepository.cinemetaAddonId {
+                let rows = resolvedHomeRows(
+                    manifest: manifest,
+                    manifestURL: resolved[index].url,
+                    addonID: addonID,
+                    addonName: resolved[index].name
+                )
                 TVHomeCatalogOrder.replaceSnapshotRows(
                     forAddonID: addonID,
                     addonName: resolved[index].name,
@@ -8517,18 +8692,16 @@ private struct AddonsSettingsSection: View {
         }
     }
 
-    /// Resolves the same subset Home can actually display. A manifest only
-    /// declares possible catalogs; personalized providers such as Watchly can
-    /// rotate that list and leave several candidates empty. Publishing all of
-    /// them made Layout disagree with Home until Home was opened.
+    /// Declaratively resolves the home catalog rows declared by an add-on's manifest,
+    /// matching Android TV's architecture. Catalogs are registered into Settings immediately
+    /// without blocking on live catalog item requests or failing on transient server outages.
     private func resolvedHomeRows(
         manifest: StremioManifest,
         manifestURL: URL,
         addonID: String,
         addonName: String
-    ) async -> [TVHomeCatalogOrder.SnapshotRow]? {
-        let disabledKeys = TVHomeCatalogOrder.disabledCatalogKeys()
-        let syncedHomeKeys = Set(TVHomeCatalogOrder.syncedCatalogOrderIndex().keys)
+    ) -> [TVHomeCatalogOrder.SnapshotRow] {
+        let activeHomeKeys = Set(TVHomeCatalogOrder.effectiveOrderKeys())
         let collectionSources: [CatalogHomeVisibilityResolver.Source] = CollectionsStore.collections().flatMap { collection in
             collection.folders.flatMap { $0.resolvedSources }
                 .filter { $0.normalizedProvider == "addon" }
@@ -8552,69 +8725,17 @@ private struct AddonsSettingsSection: View {
                     catalogID: catalog.id ?? "",
                     collectionSources: collectionSources,
                     manifestURL: manifestURL,
-                    explicitHomeKeys: syncedHomeKeys
+                    explicitHomeKeys: activeHomeKeys
                 )
                 && (!catalog.requiresGenre || catalog.firstGenreOption != nil)
         }
-        var rows: [TVHomeCatalogOrder.SnapshotRow] = []
-        var failed: [(StremioManifestCatalog, TVHomeCatalogOrder.SnapshotRow)] = []
-        var completedRequests = 0
-
-        for catalog in catalogs {
-            guard !Task.isCancelled,
-                  let row = snapshotRow(
-                      for: catalog,
-                      addonID: addonID,
-                      addonName: addonName
-                  ) else { continue }
-
-            // Hidden catalogs still belong in Layout so the user can restore
-            // them, but Home intentionally does not request their endpoints.
-            if let key = row.settingsKey, disabledKeys.contains(key) {
-                rows.append(row)
-                continue
-            }
-
-            switch await catalogAvailability(catalog, manifestURL: manifestURL) {
-            case .hasItems:
-                completedRequests += 1
-                rows.append(row)
-            case .empty:
-                completedRequests += 1
-            case .failed:
-                failed.append((catalog, row))
-            }
+        return catalogs.compactMap { catalog in
+            snapshotRow(
+                for: catalog,
+                addonID: addonID,
+                addonName: addonName
+            )
         }
-
-        // Match Home's one serial retry without publishing every intermediate
-        // row. Settings receives a single snapshot update, avoiding the laggy
-        // list churn caused by repeated inserts.
-        if !failed.isEmpty, !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            let retry = failed
-            failed.removeAll(keepingCapacity: true)
-            for (catalog, row) in retry {
-                guard !Task.isCancelled else { return nil }
-                switch await catalogAvailability(catalog, manifestURL: manifestURL) {
-                case .hasItems:
-                    completedRequests += 1
-                    rows.append(row)
-                case .empty:
-                    completedRequests += 1
-                case .failed:
-                    failed.append((catalog, row))
-                }
-            }
-        }
-
-        guard !Task.isCancelled else { return nil }
-        let requestableCount = catalogs.filter { catalog in
-            guard let key = catalog.settingsKey(addonID: addonID) else { return false }
-            return !disabledKeys.contains(key)
-        }.count
-        // A complete outage must not erase a previously useful snapshot.
-        guard requestableCount == 0 || completedRequests > 0 else { return nil }
-        return rows
     }
 
     private func snapshotRow(
@@ -8643,40 +8764,6 @@ private struct AddonsSettingsSection: View {
         )
     }
 
-    private enum CatalogAvailability {
-        case hasItems
-        case empty
-        case failed
-    }
-
-    private func catalogAvailability(
-        _ catalog: StremioManifestCatalog,
-        manifestURL: URL
-    ) async -> CatalogAvailability {
-        guard let type = catalog.type,
-              let catalogID = catalog.id,
-              let url = try? StremioCatalogURLBuilder.url(
-                  baseURL: manifestURL.deletingLastPathComponent(),
-                  type: type,
-                  catalogId: catalogID,
-                  genre: catalog.requiresGenre ? catalog.firstGenreOption : nil
-              ) else { return .failed }
-
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse,
-                  200..<300 ~= http.statusCode else { return .failed }
-            let payload = try JSONDecoder().decode(
-                StremioCatalogPresenceResponse.self,
-                from: data
-            )
-            return payload.metas.isEmpty ? .empty : .hasItems
-        } catch {
-            return .failed
-        }
-    }
 
     /// Hides a built-in placeholder row when the account sync already provides
     /// the same addon (matched loosely by name/host, so the synced "Cinemeta"
@@ -8694,6 +8781,35 @@ private struct AddonsSettingsSection: View {
         value.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 
+    static func deletedLocalAddonIDs() -> Set<String> {
+        guard let data = ProfileSettings.current.data(forKey: SettingsKey.deletedLocalAddons),
+              let list = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return Set(list)
+    }
+
+    static func setDeletedLocalAddonIDs(_ ids: Set<String>) {
+        guard let data = try? JSONEncoder().encode(Array(ids).sorted()) else { return }
+        ProfileSettings.current.set(data, forKey: SettingsKey.deletedLocalAddons)
+    }
+
+    static func initialLocalAddons() -> [AddonItem] {
+        let deleted = deletedLocalAddonIDs()
+        let isCinemetaActive = CinemetaCatalogRepository.isCinemetaEnabled
+        return AddonItem.defaults.compactMap { item in
+            if deleted.contains(item.id) { return nil }
+            var updated = item
+            if item.id == "cinemeta" {
+                if !isCinemetaActive && ProfileSettings.current.bool(forKey: SettingsKey.cinemetaDisabled) {
+                    return nil
+                }
+                updated.isInstalled = isCinemetaActive
+            }
+            return updated
+        }
+    }
+
     private func setLocalAddonEnabled(at index: Int, isEnabled: Bool) {
         guard addons.indices.contains(index) else { return }
         addons[index].isInstalled = isEnabled
@@ -8707,17 +8823,48 @@ private struct AddonsSettingsSection: View {
                 preferences.append(StreamAddonPreference(url: cinemetaURL, enabled: isEnabled))
             }
             CinemetaCatalogRepository.setConfiguredStreamAddonPreferences(preferences)
+            CinemetaCatalogRepository.setCinemetaDisabled(!isEnabled)
+            streamAddonManifestStates = ProfileSettings.current.string(forKey: SettingsKey.streamAddonManifestStates) ?? ""
+            NotificationCenter.default.post(
+                name: NuvioSyncManager.addonOrderChangedNotification,
+                object: preferences
+            )
+            NotificationCenter.default.post(
+                name: TVHomeCatalogOrder.changedNotification,
+                object: nil
+            )
+            NotificationCenter.default.post(
+                name: TVHomeCatalogOrder.snapshotChangedNotification,
+                object: nil
+            )
         }
     }
 
     private func removeLocalAddon(at index: Int) {
         guard addons.indices.contains(index) else { return }
         let addon = addons.remove(at: index)
+        var deleted = Self.deletedLocalAddonIDs()
+        deleted.insert(addon.id)
+        Self.setDeletedLocalAddonIDs(deleted)
         if addon.id == "cinemeta" {
             var preferences = CinemetaCatalogRepository.configuredStreamAddonPreferences
             let cinemetaURL = "https://v3-cinemeta.strem.io/manifest.json"
             preferences.removeAll(where: { $0.url.caseInsensitiveCompare(cinemetaURL) == .orderedSame })
             CinemetaCatalogRepository.setConfiguredStreamAddonPreferences(preferences)
+            CinemetaCatalogRepository.setCinemetaDisabled(true)
+            streamAddonManifestStates = ProfileSettings.current.string(forKey: SettingsKey.streamAddonManifestStates) ?? ""
+            NotificationCenter.default.post(
+                name: NuvioSyncManager.addonOrderChangedNotification,
+                object: preferences
+            )
+            NotificationCenter.default.post(
+                name: TVHomeCatalogOrder.changedNotification,
+                object: nil
+            )
+            NotificationCenter.default.post(
+                name: TVHomeCatalogOrder.snapshotChangedNotification,
+                object: nil
+            )
         }
     }
 
@@ -8844,13 +8991,6 @@ struct StremioManifestCatalogExtra: Decodable {
     let options: [String]?
 }
 
-private struct StremioCatalogPresenceResponse: Decodable {
-    let metas: [StremioCatalogPresenceMeta]
-}
-
-private struct StremioCatalogPresenceMeta: Decodable {
-    let id: String?
-}
 
 private struct SyncedAddonSettingsRow: View {
     let addon: SyncedAddon
@@ -9081,16 +9221,16 @@ private struct HomeCatalogOrderSection: View {
             }
         }
         .onAppear(perform: reload)
-        .onReceive(NotificationCenter.default.publisher(for: NuvioSyncManager.addonOrderChangedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NuvioSyncManager.addonOrderChangedNotification).receive(on: RunLoop.main)) { _ in
             reload()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NuvioSyncManager.homeContentSyncedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NuvioSyncManager.homeContentSyncedNotification).receive(on: RunLoop.main)) { _ in
             reload()
         }
-        .onReceive(NotificationCenter.default.publisher(for: TVHomeCatalogOrder.changedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: TVHomeCatalogOrder.changedNotification).receive(on: RunLoop.main)) { _ in
             reload()
         }
-        .onReceive(NotificationCenter.default.publisher(for: TVHomeCatalogOrder.snapshotChangedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: TVHomeCatalogOrder.snapshotChangedNotification).receive(on: RunLoop.main)) { _ in
             reload()
         }
     }
@@ -9239,7 +9379,7 @@ private struct CollectionsSettingsSection: View {
             }
         }
         .onAppear { collections = CollectionsStore.rawCollections() }
-        .onReceive(NotificationCenter.default.publisher(for: CollectionsStore.changedNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: CollectionsStore.changedNotification).receive(on: RunLoop.main)) { _ in
             collections = CollectionsStore.rawCollections()
         }
         .sheet(item: $activeSheet) { sheet in

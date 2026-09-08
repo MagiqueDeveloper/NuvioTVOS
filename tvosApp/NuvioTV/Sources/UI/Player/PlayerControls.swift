@@ -23,6 +23,7 @@ struct PlayerControls: View {
     @AppStorage(SettingsKey.playerShowPiP) private var playerShowPiP = true
     @AppStorage(SettingsKey.playerShowEpisodes) private var playerShowEpisodes = true
     @AppStorage(SettingsKey.playerShowSources) private var playerShowSources = true
+    @AppStorage(SettingsKey.playerShowSubtitles) private var playerShowSubtitles = true
 
     private var isShowingPause: Bool {
         viewModel.status == .playing
@@ -145,7 +146,7 @@ struct PlayerControls: View {
         if viewModel.isPictureInPictureSupported && playerShowPiP { order.append(.pip) }
         if viewModel.canShowEpisodesPanel && playerShowEpisodes { order.append(.episodes) }
         if viewModel.canShowSourcesPanel && playerShowSources { order.append(.sources) }
-        if canShowSubtitlePicker { order.append(.subtitles) }
+        if canShowSubtitlePicker && playerShowSubtitles { order.append(.subtitles) }
         order.append(.settings)
         return order
     }
@@ -169,24 +170,6 @@ struct PlayerControls: View {
 
     private var subtitlePickerOptions: [SubtitlePanelOption] {
         subtitlePanelOptions(for: viewModel)
-    }
-
-    private var builtInSubtitleOptions: [SubtitlePanelOption] {
-        subtitlePickerOptions.filter { option in
-            guard case .track(let track) = option.kind else { return false }
-            return track.externalFilename.isEmpty
-        }
-    }
-
-    private var externalSubtitleOptions: [SubtitlePanelOption] {
-        subtitlePickerOptions.filter { option in
-            switch option.kind {
-            case .track(let track):
-                return !track.externalFilename.isEmpty
-            case .external:
-                return true
-            }
-        }
     }
 
     /// Settings-style flash prevention: while the progress bar owns focus, only
@@ -352,7 +335,7 @@ struct PlayerControls: View {
                 .id("sources_button")
             }
 
-            if canShowSubtitlePicker {
+            if canShowSubtitlePicker && playerShowSubtitles {
                 subtitleMenuButton
             }
 
@@ -415,6 +398,41 @@ struct PlayerControls: View {
         .animation(.easeOut(duration: 0.14), value: isFocused)
     }
 
+    private var subtitleLanguageGroups: [SubtitleLanguageGroup] {
+        var groups: [String: [SubtitlePanelOption]] = [:]
+        var order: [String] = []
+        for option in subtitlePickerOptions {
+            if groups[option.language] == nil {
+                order.append(option.language)
+            }
+            groups[option.language, default: []].append(option)
+        }
+        let preferredLanguages = SubtitleLanguagePreferences.orderedFromDefaults()
+        let sortedLanguages = order.sorted { lhs, rhs in
+            let lhsRank = preferredLanguages.firstIndex {
+                SubtitleLanguagePreferences.matches(lhs, target: $0)
+            }
+            let rhsRank = preferredLanguages.firstIndex {
+                SubtitleLanguagePreferences.matches(rhs, target: $0)
+            }
+            switch (lhsRank, rhsRank) {
+            case let (left?, right?) where left != right:
+                return left < right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                break
+            }
+            return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+
+        return sortedLanguages.map { lang in
+            SubtitleLanguageGroup(language: lang, options: groups[lang] ?? [])
+        }
+    }
+
     private var subtitleMenuButton: some View {
         let isFocused = focusedControl == .subtitles
 
@@ -427,25 +445,43 @@ struct PlayerControls: View {
                 }
             }
 
-            if !builtInSubtitleOptions.isEmpty {
-                Section("Built-In") {
-                    ForEach(builtInSubtitleOptions) { option in
-                        Button {
-                            selectSubtitlePickerOption(option)
-                        } label: {
-                            subtitleMenuItem(title: option.title, detail: option.detail, isSelected: option.isSelected)
+            ForEach(subtitleLanguageGroups) { group in
+                Menu {
+                    if !group.builtInOptions.isEmpty {
+                        Section("Built-In") {
+                            ForEach(group.builtInOptions) { option in
+                                Button {
+                                    selectSubtitlePickerOption(option)
+                                } label: {
+                                    subtitleMenuItem(
+                                        title: builtInMenuTitle(option: option),
+                                        isSelected: option.isSelected
+                                    )
+                                }
+                            }
                         }
                     }
-                }
-            }
 
-            if !externalSubtitleOptions.isEmpty {
-                Section("External Subtitles") {
-                    ForEach(externalSubtitleOptions) { option in
-                        Button {
-                            selectSubtitlePickerOption(option)
-                        } label: {
-                            subtitleMenuItem(title: option.title, detail: option.detail, isSelected: option.isSelected)
+                    if !group.externalOptions.isEmpty {
+                        Section("External Subtitles") {
+                            ForEach(group.externalOptions) { option in
+                                Button {
+                                    selectSubtitlePickerOption(option)
+                                } label: {
+                                    subtitleMenuItem(
+                                        title: groupedExternalMenuTitle(option: option),
+                                        isSelected: option.isSelected
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text(group.language)
+                        Spacer()
+                        if group.hasSelected {
+                            Image(systemName: "checkmark")
                         }
                     }
                 }
@@ -472,16 +508,48 @@ struct PlayerControls: View {
         .id("subtitles_button")
     }
 
-    private func subtitleMenuItem(title: String, detail: String? = nil, isSelected: Bool) -> some View {
+    private func sanitizeSubtitleLabel(_ raw: String?) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        // Filter out hashes, OpenSubtitles v3 file tokens (e.g. v3_e1_...), UUIDs, or long alphanumeric keys
+        if raw.hasPrefix("v3_") || raw.hasPrefix("sub_") || raw.contains("AfAB") || raw.count > 25 {
+            return nil
+        }
+        if raw.range(of: #"[a-zA-Z0-9_-]{15,}"#, options: .regularExpression) != nil {
+            return nil
+        }
+        let stripped = raw.replacingOccurrences(
+            of: #"\b\d{5,}\b|[_\-]\d{5,}"#,
+            with: "",
+            options: .regularExpression
+        ).trimmingCharacters(in: CharacterSet(charactersIn: " -_()[]"))
+        return stripped.isEmpty ? nil : stripped
+    }
+
+    private func builtInMenuTitle(option: SubtitlePanelOption) -> String {
+        let title = option.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLabel = sanitizeSubtitleLabel(option.detail)
+        let displayTitle = title.isEmpty ? option.language : title
+        if let cleanLabel,
+           cleanLabel.caseInsensitiveCompare(displayTitle) != .orderedSame,
+           cleanLabel.caseInsensitiveCompare(option.language) != .orderedSame {
+            return "\(displayTitle) (\(cleanLabel))"
+        }
+        return displayTitle
+    }
+
+    private func groupedExternalMenuTitle(option: SubtitlePanelOption) -> String {
+        let addon = option.badge.isEmpty ? "External" : option.badge
+        let cleanLabel = sanitizeSubtitleLabel(option.detail)
+
+        if let cleanLabel, cleanLabel.caseInsensitiveCompare(option.language) != .orderedSame {
+            return "\(addon) (\(cleanLabel))"
+        }
+        return addon
+    }
+
+    private func subtitleMenuItem(title: String, isSelected: Bool) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                if let detail {
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
+            Text(title)
             Spacer()
             if isSelected {
                 Image(systemName: "checkmark")
@@ -875,6 +943,31 @@ private struct SubtitlePanelOption: Identifiable {
     let detail: String?
     let language: String
     let isSelected: Bool
+}
+
+private struct SubtitleLanguageGroup: Identifiable {
+    var id: String { language }
+    let language: String
+    let options: [SubtitlePanelOption]
+    var builtInOptions: [SubtitlePanelOption] {
+        options.filter { option in
+            guard case .track(let track) = option.kind else { return false }
+            return track.externalFilename.isEmpty
+        }
+    }
+    var externalOptions: [SubtitlePanelOption] {
+        options.filter { option in
+            switch option.kind {
+            case .track(let track):
+                return !track.externalFilename.isEmpty
+            case .external:
+                return true
+            }
+        }
+    }
+    var hasSelected: Bool {
+        options.contains(where: \.isSelected)
+    }
 }
 
 /// Maps raw track/addon language values ("en", "eng", "English") onto one

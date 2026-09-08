@@ -1331,6 +1331,143 @@ final class SimklAuthServiceTests: XCTestCase {
 
         manager.isEnabled = original
     }
+
+    func testSimklContinueWatchingResolvesRealisticRuntimeWhenMissing() {
+        let seriesMeta = makeMeta(type: "series")
+        let resolvedRuntime = runtimeSeconds(for: seriesMeta)
+        XCTAssertEqual(resolvedRuntime, 2700)
+
+        let movieMeta = makeMeta(type: "movie")
+        let movieRuntime = runtimeSeconds(for: movieMeta)
+        XCTAssertEqual(movieRuntime, 7200)
+
+        let customMeta = NuvioMeta(
+            id: "tt9999999",
+            name: "Custom Runtime",
+            description: nil,
+            posterUrl: nil,
+            backgroundUrl: nil,
+            logoUrl: nil,
+            imdbId: "tt9999999",
+            tmdbId: nil,
+            type: "series",
+            year: 2026,
+            genres: nil,
+            rating: nil,
+            releaseInfo: nil,
+            runtime: "55 min",
+            cast: nil,
+            director: nil,
+            writer: nil,
+            certification: nil,
+            country: nil,
+            released: nil
+        )
+        XCTAssertEqual(runtimeSeconds(for: customMeta), 3300)
+    }
+
+    @MainActor
+    func testMergingLocalPlaybackCheckpointsPreservesExactStreamCheckpoint() {
+        let meta = makeMeta(type: "series")
+        let localPosition: Double = 1234.5
+        let localDuration: Double = 2469.0
+        let episodeSeason = 1
+        let episodeNumber = 2
+
+        TraktProgressService.recordLocalPlayback(
+            meta: meta,
+            position: localPosition,
+            duration: localDuration,
+            season: episodeSeason,
+            episode: episodeNumber,
+            source: .simkl,
+            notify: false
+        )
+
+        let initialCheck = TraktProgressService.currentContinueWatchingItem(for: meta, source: .simkl)
+        XCTAssertEqual(initialCheck?.position, localPosition)
+        XCTAssertEqual(initialCheck?.duration, localDuration)
+
+        // Remote scrobble response arrives with slight timestamp advance and estimated duration
+        let remoteItem = ContinueWatchingItem(
+            meta: meta,
+            streamUrl: "",
+            position: 1350.0,
+            duration: 2700.0,
+            lastWatchedAt: Date().addingTimeInterval(2),
+            season: episodeSeason,
+            episode: episodeNumber,
+            released: nil,
+            episodeTitleOverride: "Episode 2",
+            episodeOverviewOverride: nil,
+            episodeThumbnailOverride: nil,
+            isUpNext: false
+        )
+
+        let merged = TraktProgressService.mergingLocalPlaybackCheckpoints(into: [remoteItem], source: .simkl)
+        let mergedItem = merged.first
+        XCTAssertNotNil(mergedItem)
+
+        // Exact measured stream playback position and duration must be preserved
+        XCTAssertEqual(mergedItem?.position, localPosition)
+        XCTAssertEqual(mergedItem?.duration, localDuration)
+
+        // Local checkpoint must not have been deleted from localPlaybackCheckpoints
+        let retainedLocal = TraktProgressService.currentContinueWatchingItem(for: meta, source: .simkl)
+        XCTAssertEqual(retainedLocal?.position, localPosition)
+        XCTAssertEqual(retainedLocal?.duration, localDuration)
+    }
+
+    func testContentIdentityKeysRecognizesSimklPrefix() {
+        let keys = WatchedStore.contentIdentityKeys(metaId: "simkl:45678", imdbId: nil, tmdbId: nil)
+        XCTAssertTrue(keys.contains("simkl:45678"))
+
+        let metaA = NuvioMeta(
+            id: "simkl:45678",
+            name: "Test Show",
+            description: nil,
+            posterUrl: nil,
+            backgroundUrl: nil,
+            logoUrl: nil,
+            imdbId: nil,
+            tmdbId: nil,
+            type: "series",
+            year: 2026,
+            genres: nil,
+            rating: nil,
+            releaseInfo: nil,
+            runtime: nil,
+            cast: nil,
+            director: nil,
+            writer: nil,
+            certification: nil,
+            country: nil,
+            released: nil
+        )
+        let metaB = NuvioMeta(
+            id: "simkl:45678",
+            name: "Test Show (Alternate)",
+            description: nil,
+            posterUrl: nil,
+            backgroundUrl: nil,
+            logoUrl: nil,
+            imdbId: nil,
+            tmdbId: nil,
+            type: "series",
+            year: 2026,
+            genres: nil,
+            rating: nil,
+            releaseInfo: nil,
+            runtime: nil,
+            cast: nil,
+            director: nil,
+            writer: nil,
+            certification: nil,
+            country: nil,
+            released: nil
+        )
+        XCTAssertTrue(WatchedStore.sameContent(metaA, metaB))
+    }
 }
 
 private actor SimklIntegerRecorder {
