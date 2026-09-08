@@ -14,7 +14,7 @@ Restore these from the fork parent (`HEAD` during the merge, which is `fork/main
 | --- | --- |
 | `.github/ISSUE_TEMPLATE/` | Issues disabled; redirect to upstream; tvOS-only fields |
 | `.github/workflows/ci.yml` | Fork PR/main tvOS build + `NuvioTVTests` |
-| `.github/workflows/nightly.yml` | Rolling `nightly` release with one versioned, full-detail unsigned IPA; stale IPA assets are removed |
+| `.github/workflows/nightly.yml` | Rolling `nightly` release for code/app changes, with one versioned, full-detail unsigned IPA; stale IPA assets are removed |
 | `.github/workflows/update-latest-beta.yml` | Skip the `nightly` prerelease tag when updating the README |
 | `CONTRIBUTING.md` | Points contributors at upstream |
 | `FUTURE_IMPLEMENTATION.md` | tvOS-only wording |
@@ -139,6 +139,8 @@ README: keep the fork banner and tvOS-only About/setup; take origin's `<!-- BEGI
 
 Keep `scripts/build-ipa.sh` from the fork scaffold. It must write `build-ipa/build-metadata.env` with the packaged app's `version` and `build`, because the Nightly workflow uses that metadata to name the release asset. The workflow copies upstream's `NuvioTV-${version}-unsigned-release.ipa` to `NuvioTV-${version}-${date}.${run}+${sha}-unsigned.ipa`, removes every older `.ipa` from the rolling release, and uploads exactly one current asset. There must be no `NuvioTV.ipa` release asset or SideStore wording.
 
+Keep the Nightly path filter and `has-code-changes` helper aligned. Pushes to `main` should match `.github/workflows/`, `MPVKit/`, `Vendor/`, `scripts/`, `supabase/`, or `tvosApp/`; documentation, release notes, and other non app changes should not start a Nightly build. Scheduled runs use the same paths when deciding whether anything changed since the last successful Nightly.
+
 Done when `git diff --name-only --diff-filter=U` is empty.
 
 ### 5. Verify
@@ -151,6 +153,8 @@ test -f scripts/ci/nightly_release.py
 test -f scripts/build-ipa.sh
 rg -q "build-metadata.env" scripts/build-ipa.sh
 if rg -q "NuvioTV\\.ipa|SideStore" .github/workflows/nightly.yml scripts/ci/nightly_release.py; then exit 1; fi
+rg -q '"tvosApp/\\*\\*"' .github/workflows/nightly.yml
+rg -q "has-code-changes" .github/workflows/nightly.yml scripts/ci/nightly_release.py
 test ! -d composeApp
 test ! -d artifacts
 ```

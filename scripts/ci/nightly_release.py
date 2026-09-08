@@ -11,6 +11,15 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+NIGHTLY_CHANGE_PATHS = (
+    ".github/workflows/",
+    "MPVKit/",
+    "Vendor/",
+    "scripts/",
+    "supabase/",
+    "tvosApp/",
+)
+
 
 def run(cmd: list[str], check: bool = True) -> str:
     result = subprocess.run(cmd, check=check, capture_output=True, text=True)
@@ -70,6 +79,24 @@ def count_new_commits(since_sha: str) -> int:
         return int(out or "0")
     except ValueError:
         return 1
+
+
+def has_code_changes(since_sha: str) -> bool:
+    """Return whether code or app files changed since the last nightly commit."""
+    if not since_sha:
+        return True
+    changed = run(
+        [
+            "git",
+            "diff",
+            "--name-only",
+            f"{since_sha}..HEAD",
+            "--",
+            *NIGHTLY_CHANGE_PATHS,
+        ],
+        check=False,
+    )
+    return bool(changed)
 
 
 def changelog(since_sha: str, until_sha: str) -> str:
@@ -153,6 +180,9 @@ def main() -> int:
     p_count = sub.add_parser("count-new-commits")
     p_count.add_argument("since_sha")
 
+    p_changes = sub.add_parser("has-code-changes")
+    p_changes.add_argument("since_sha")
+
     p_notes = sub.add_parser("write-notes")
     p_notes.add_argument("--output", required=True)
     p_notes.add_argument("--repo", required=True)
@@ -172,6 +202,9 @@ def main() -> int:
         return 0
     if args.cmd == "count-new-commits":
         print(count_new_commits(args.since_sha))
+        return 0
+    if args.cmd == "has-code-changes":
+        print(str(has_code_changes(args.since_sha)).lower())
         return 0
     if args.cmd == "write-notes":
         write_notes(

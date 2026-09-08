@@ -6,6 +6,13 @@ name: Nightly
 on:
   push:
     branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - "MPVKit/**"
+      - "Vendor/**"
+      - "scripts/**"
+      - "supabase/**"
+      - "tvosApp/**"
   schedule:
     # 00:00 UTC daily.
     - cron: "0 0 * * *"
@@ -52,19 +59,19 @@ jobs:
           echo "sha=${LAST}" >> "$GITHUB_OUTPUT"
           echo "Last successful nightly commit: ${LAST:-<none>}"
 
-      - name: Check for new changes (schedule only)
+      - name: Check for new code changes (schedule only)
         id: check_changes
         if: github.event_name == 'schedule'
         run: |
           set -euo pipefail
-          NEW_COMMITS="$(python3 scripts/ci/nightly_release.py count-new-commits '${{ steps.last_success.outputs.sha }}')"
+          HAS_CODE_CHANGES="$(python3 scripts/ci/nightly_release.py has-code-changes '${{ steps.last_success.outputs.sha }}')"
           SHOULD_BUILD=false
-          if [[ "${NEW_COMMITS}" -ge 1 ]]; then
+          if [[ "${HAS_CODE_CHANGES}" == "true" ]]; then
             SHOULD_BUILD=true
           fi
-          echo "new_commits=${NEW_COMMITS}" >> "$GITHUB_OUTPUT"
+          echo "has_code_changes=${HAS_CODE_CHANGES}" >> "$GITHUB_OUTPUT"
           echo "should_build=${SHOULD_BUILD}" >> "$GITHUB_OUTPUT"
-          echo "New commits since last success: ${NEW_COMMITS} (build=${SHOULD_BUILD})"
+          echo "Code/app changes since last success: ${HAS_CODE_CHANGES} (build=${SHOULD_BUILD})"
 
       - name: Build gate
         id: build_gate
