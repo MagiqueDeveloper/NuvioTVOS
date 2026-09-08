@@ -355,6 +355,24 @@ final class DetailsViewModelTests: XCTestCase {
         XCTAssertEqual(merged?.first(where: { $0.season == 4 })?.title, "S4E1 TMDB Title")
     }
 
+    func testEpisodeStreamIdentityUsesSeriesIMDbIDForEnrichedEpisodes() {
+        let episode = NuvioVideo(
+            id: "tmdb:12345:2:7",
+            title: "Episode 7",
+            season: 2,
+            episode: 7,
+            thumbnail: nil,
+            overview: nil,
+            released: nil,
+            rating: nil
+        )
+
+        XCTAssertEqual(
+            EpisodeStreamIdentity.canonicalID(for: episode, seriesStreamID: "tt7654321"),
+            "tt7654321:2:7"
+        )
+    }
+
     func testCatalogPreviewsDoNotCountAsFullCachedMetadata() {
         let repo = CinemetaCatalogRepository()
         let testId = "tt_test_series_preview"
