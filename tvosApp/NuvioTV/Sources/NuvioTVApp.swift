@@ -1122,7 +1122,11 @@ struct ContentView: View {
         continueWatchingPlaybackTask = Task {
             let prepared: PreparedNextStream?
             if let episode = context.current {
-                prepared = await Self.resolveNextEpisodeStream(episode: episode, profileId: profileId)
+                prepared = await Self.resolveNextEpisodeStream(
+                    episode: episode,
+                    seriesStreamID: item.meta.streamId,
+                    profileId: profileId
+                )
             } else if item.meta.isSeries, let numbers = item.episodeNumbers {
                 prepared = await Self.resolveStream(
                     contentId: "\(item.meta.id):\(numbers.season):\(numbers.episode)",
@@ -1822,9 +1826,17 @@ struct ContentView: View {
     /// seamless auto-advance: fetches the episode's streams (concurrently) and
     /// applies the same smart selection the details screen uses. Returns nil when
     /// nothing real is available, so the player falls back to a normal end.
-    private static func resolveNextEpisodeStream(episode: NuvioVideo, profileId: String?) async -> PreparedNextStream? {
-        await resolveStream(
-            contentId: episode.id,
+    private static func resolveNextEpisodeStream(
+        episode: NuvioVideo,
+        seriesStreamID: String? = nil,
+        profileId: String?
+    ) async -> PreparedNextStream? {
+        let contentId = EpisodeStreamIdentity.canonicalID(
+            for: episode,
+            seriesStreamID: seriesStreamID
+        )
+        return await resolveStream(
+            contentId: contentId,
             type: "series",
             subtitleLine: "S\(episode.season) · E\(episode.episode) · \(episode.title)",
             profileId: profileId
@@ -2111,7 +2123,11 @@ struct ContentView: View {
             autoPlayNextEnabled: autoPlayNext,
             autoPlayNextCountdownSeconds: autoPlayNextCountdown,
             resolveNextStream: (isTrailer || !meta.isSeries) ? nil : { episode in
-                await Self.resolveNextEpisodeStream(episode: episode, profileId: profileViewModel.activeProfile?.id)
+                await Self.resolveNextEpisodeStream(
+                    episode: episode,
+                    seriesStreamID: meta.streamId,
+                    profileId: profileViewModel.activeProfile?.id
+                )
             },
             reloadCurrentStream: isTrailer ? nil : { excludedURLs in
                 let profileId = profileViewModel.activeProfile?.id

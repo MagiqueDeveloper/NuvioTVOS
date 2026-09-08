@@ -329,13 +329,7 @@ struct DetailsScreen: View {
     }
 
     private func canonicalEpisodeStreamId(for video: NuvioVideo, meta: NuvioMeta?) -> String {
-        if video.id.hasPrefix("tt") {
-            return video.id
-        }
-        if let metaStreamId = meta?.streamId, metaStreamId.hasPrefix("tt") {
-            return "\(metaStreamId):\(video.season):\(video.episode)"
-        }
-        return video.id
+        EpisodeStreamIdentity.canonicalID(for: video, seriesStreamID: meta?.streamId)
     }
 
     private func startStreamFlow(streamId: String, type: String, reload: Bool, forceManualPicker: Bool = false) {

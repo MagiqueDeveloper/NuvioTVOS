@@ -417,6 +417,22 @@ struct NuvioVideo: Identifiable, Codable, Hashable {
     let rating: String?
 }
 
+/// Canonical stream lookup identity for an episode. Episode guides can be
+/// enriched by TMDB (and therefore carry a `tmdb:` id) even when the stream
+/// add-ons use the series' IMDb id. Keep manual playback and autoplay on the
+/// same lookup identity.
+enum EpisodeStreamIdentity {
+    static func canonicalID(for episode: NuvioVideo, seriesStreamID: String?) -> String {
+        if episode.id.hasPrefix("tt") {
+            return episode.id
+        }
+        if let seriesStreamID, seriesStreamID.hasPrefix("tt") {
+            return "\(seriesStreamID):\(episode.season):\(episode.episode)"
+        }
+        return episode.id
+    }
+}
+
 enum EpisodeReleasePolicy {
     static let showUnairedNextUpKey = "nuvio.tv.settings.layout.showUnairedNextUp"
     static let upcomingNextSeasonWindowDays = 7
