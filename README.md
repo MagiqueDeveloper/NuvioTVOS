@@ -2,7 +2,7 @@
 >
 > - **Upstream (releases, issues, PRs):** https://github.com/bobsupra/NuvioTVOS  
 > - **This fork (WIP branches / experiments):** https://github.com/MagiqueDeveloper/NuvioTVOS  
-> - **Nightly IPA (this fork):** pushes to `main` and a daily schedule refresh the rolling [`nightly`](https://github.com/MagiqueDeveloper/NuvioTVOS/releases/tag/nightly) prerelease (`NuvioTV.ipa`, SideStore-style stable URL)
+> - **Nightly IPA (this fork):** pushes to `main` and a daily schedule refresh the rolling [`nightly`](https://github.com/MagiqueDeveloper/NuvioTVOS/releases/tag/nightly) prerelease with the latest versioned unsigned IPA.
 > - Open bugs and feature requests on the [upstream issue tracker](https://github.com/bobsupra/NuvioTVOS/issues). Download official builds from [upstream Releases](https://github.com/bobsupra/NuvioTVOS/releases).
 
 <div align="center">

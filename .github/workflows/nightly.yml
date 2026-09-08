@@ -1,13 +1,13 @@
 name: Nightly
 
-# SideStore-style rolling nightly: fixed tag `nightly`, stable IPA asset name,
-# changelog since last successful publish, daily schedule + main pushes.
+# Rolling nightly release on the fixed `nightly` tag, with a full-detail IPA
+# filename, changelog since the last successful publish, and daily refreshes.
 
 on:
   push:
     branches: [main]
   schedule:
-    # 00:00 UTC daily (same idea as SideStore's nightly cron)
+    # 00:00 UTC daily.
     - cron: "0 0 * * *"
   workflow_dispatch:
 
@@ -22,7 +22,6 @@ permissions:
 env:
   NIGHTLY_TAG: nightly
   NIGHTLY_TITLE: Nightly
-  NIGHTLY_ASSET: NuvioTV.ipa
   WORKFLOW_FILE: Nightly
 
 jobs:
@@ -108,8 +107,7 @@ jobs:
         with:
           name: NuvioTV-nightly-ipa
           path: |
-            build-ipa/NuvioTV.ipa
-            build-ipa/NuvioTV-*.ipa
+            build-ipa/NuvioTV-*-unsigned-release.ipa
             build-ipa/build-metadata.env
           if-no-files-found: error
 
@@ -126,8 +124,17 @@ jobs:
           FULL_SHA="$(git rev-parse HEAD)"
           UTC_DATE="$(date -u +%Y%m%d)"
           NIGHTLY_VERSION="${version}-${UTC_DATE}.${GITHUB_RUN_NUMBER}+${SHORT_SHA}"
+          RELEASE_ASSET="NuvioTV-${NIGHTLY_VERSION}-unsigned.ipa"
+          GENERATED_ASSET="build-ipa/NuvioTV-${version}-unsigned-release.ipa"
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           NOTES_FILE="$(mktemp)"
+
+          if [[ ! -f "${GENERATED_ASSET}" ]]; then
+            echo "Expected generated IPA was not found: ${GENERATED_ASSET}" >&2
+            exit 1
+          fi
+
+          cp -f "${GENERATED_ASSET}" "build-ipa/${RELEASE_ASSET}"
 
           python3 scripts/ci/nightly_release.py write-notes \
             --output "${NOTES_FILE}" \
@@ -139,13 +146,7 @@ jobs:
             --last-success "${{ steps.last_success.outputs.sha }}" \
             --run-id "${GITHUB_RUN_ID}" \
             --run-url "${RUN_URL}" \
-            --asset-name "${NIGHTLY_ASSET}"
-
-          # Ensure stable SideStore-style asset name exists.
-          # BSD `cp` exits 1 when source and dest are the same path.
-          if [[ "${NIGHTLY_ASSET}" != "NuvioTV.ipa" ]]; then
-            cp -f "build-ipa/NuvioTV.ipa" "build-ipa/${NIGHTLY_ASSET}"
-          fi
+            --asset-name "${RELEASE_ASSET}"
 
           if gh release view "${NIGHTLY_TAG}" >/dev/null 2>&1; then
             gh release edit "${NIGHTLY_TAG}" \
@@ -161,22 +162,17 @@ jobs:
               --target "${FULL_SHA}"
           fi
 
-          # Replace the stable IPA (constant download URL).
-          gh release upload "${NIGHTLY_TAG}" \
-            "build-ipa/${NIGHTLY_ASSET}" \
-            --clobber
-
-          # Keep a single SHA-stamped copy for forensics; drop older stamped IPAs.
-          SHA_ASSET="NuvioTV-${NIGHTLY_VERSION}-unsigned.ipa"
-          cp -f "build-ipa/NuvioTV.ipa" "build-ipa/${SHA_ASSET}"
+          # Keep exactly one IPA in the rolling release. This removes the old
+          # stable-name asset and any prior stamped assets before uploading the
+          # current full-detail filename.
           existing="$(gh release view "${NIGHTLY_TAG}" --json assets --jq '.assets[].name')"
           while IFS= read -r asset; do
             [[ -n "$asset" ]] || continue
-            if [[ "$asset" != "${NIGHTLY_ASSET}" && "$asset" == NuvioTV-*-unsigned.ipa ]]; then
+            if [[ "$asset" == *.ipa ]]; then
               gh release delete-asset "${NIGHTLY_TAG}" "$asset" --yes || true
             fi
           done <<< "$existing"
-          gh release upload "${NIGHTLY_TAG}" "build-ipa/${SHA_ASSET}" --clobber
+          gh release upload "${NIGHTLY_TAG}" "build-ipa/${RELEASE_ASSET}" --clobber
 
           echo "Nightly release updated (${NIGHTLY_VERSION}):"
           gh release view "${NIGHTLY_TAG}" --json url,tagName,isPrerelease,assets \

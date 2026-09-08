@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Helpers for the rolling Nightly IPA release (SideStore-style)."""
+"""Helpers for the rolling Nightly IPA release."""
 
 from __future__ import annotations
 
@@ -115,9 +115,7 @@ def write_notes(
 
     body = f"""This is an ⚠️ **EXPERIMENTAL** ⚠️ Nightly build for commit [{commit}]({commit_url}).
 
-Nightly builds are **development snapshots for testers**. They often contain bugs and unfinished work. Use at your own risk.
-
-Official releases stay on [bobsupra/NuvioTVOS](https://github.com/bobsupra/NuvioTVOS/releases).
+Nightly builds are **development snapshots for testers**. They often contain bugs and unfinished work. Use at your own risk. Official releases stay on [bobsupra/NuvioTVOS](https://github.com/bobsupra/NuvioTVOS/releases).
 
 ## Build Info
 
@@ -136,7 +134,7 @@ Workflow: [run {run_id}]({run_url})
 
 ## Download
 
-Use **{asset_name}** — this file is replaced on every successful nightly publish (same stable URL as SideStore's rolling Nightly).
+Download **{asset_name}** from this release. The filename includes the app version, build date, workflow run, and source commit.
 
 The IPA is **unsigned**. Sideload with Xcode, Apple Configurator, or your preferred signing tool.
 """
