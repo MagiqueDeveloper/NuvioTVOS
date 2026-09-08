@@ -14,11 +14,12 @@ Restore these from the fork parent (`HEAD` during the merge, which is `fork/main
 | --- | --- |
 | `.github/ISSUE_TEMPLATE/` | Issues disabled; redirect to upstream; tvOS-only fields |
 | `.github/workflows/ci.yml` | Fork PR/main tvOS build + `NuvioTVTests` |
-| `.github/workflows/nightly.yml` | Rolling `nightly` IPA on this fork |
+| `.github/workflows/nightly.yml` | Rolling `nightly` release with one versioned, full-detail unsigned IPA; stale IPA assets are removed |
 | `.github/workflows/update-latest-beta.yml` | Skip the `nightly` prerelease tag when updating the README |
 | `CONTRIBUTING.md` | Points contributors at upstream |
 | `FUTURE_IMPLEMENTATION.md` | tvOS-only wording |
 | `scripts/ci/` | `nightly_release.py` for the Nightly workflow |
+| `scripts/build-ipa.sh` | Fork-specific `build-ipa/build-metadata.env` output consumed by Nightly |
 | `scripts/run-tvos.sh` | Simulator helper used in the fork README |
 | `MPVKit/` | In-tree sources (not the upstream git submodule) |
 | `.gitignore` | Ignore all of `artifacts/`, plus `MPVKit/.build/` and `MPVKit/.swiftpm/` |
@@ -33,7 +34,6 @@ Take these from `origin/main` (overwrite ours):
 - `supabase/`
 - `memory.md`
 - `LICENSE`
-- `scripts/build-ipa.sh`
 - `scripts/deploy_trakt_function.sh`
 - `scripts/run-mobile.sh`
 - `scripts/translate_catalog.py`
@@ -109,7 +109,7 @@ Conflicts are expected. Do not resolve hunk-by-hunk in `tvosApp/` or `Vendor/`.
 ```sh
 git checkout origin/main -- \
   tvosApp Vendor release .agents supabase memory.md LICENSE \
-  scripts/build-ipa.sh scripts/deploy_trakt_function.sh \
+  scripts/deploy_trakt_function.sh \
   scripts/run-mobile.sh scripts/translate_catalog.py
 
 git checkout HEAD -- \
@@ -120,6 +120,7 @@ git checkout HEAD -- \
   CONTRIBUTING.md \
   FUTURE_IMPLEMENTATION.md \
   scripts/ci \
+  scripts/build-ipa.sh \
   scripts/run-tvos.sh \
   MPVKit
 
@@ -136,6 +137,8 @@ Then `git rm` every leftover fork-only `tvosApp` path from the `comm` command in
 
 README: keep the fork banner and tvOS-only About/setup; take origin's `<!-- BEGIN LATEST_BETA -->` block and "New in Beta …" notes. Confirm `.gitignore` still ignores `artifacts/` (not only `artifacts/*-ipa/`) and the `MPVKit` build dirs.
 
+Keep `scripts/build-ipa.sh` from the fork scaffold. It must write `build-ipa/build-metadata.env` with the packaged app's `version` and `build`, because the Nightly workflow uses that metadata to name the release asset. The workflow copies upstream's `NuvioTV-${version}-unsigned-release.ipa` to `NuvioTV-${version}-${date}.${run}+${sha}-unsigned.ipa`, removes every older `.ipa` from the rolling release, and uploads exactly one current asset. There must be no `NuvioTV.ipa` release asset or SideStore wording.
+
 Done when `git diff --name-only --diff-filter=U` is empty.
 
 ### 5. Verify
@@ -145,6 +148,9 @@ git diff origin/main -- tvosApp Vendor
 test ! -f .gitmodules
 test -f .github/workflows/nightly.yml
 test -f scripts/ci/nightly_release.py
+test -f scripts/build-ipa.sh
+rg -q "build-metadata.env" scripts/build-ipa.sh
+if rg -q "NuvioTV\\.ipa|SideStore" .github/workflows/nightly.yml scripts/ci/nightly_release.py; then exit 1; fi
 test ! -d composeApp
 test ! -d artifacts
 ```
