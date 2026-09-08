@@ -342,6 +342,18 @@ final class StreamQualityTagsTests: XCTestCase {
         XCTAssertEqual(WatchProgressLedger.completionFraction, 0.90)
     }
 
+    func testInfusePositionCallbackCanDetermineCompletionFromSessionRuntime() {
+        let callback = ExternalPlaybackCallback.parse(
+            URL(string: "nuvio-tv://external-playback/ABC-123?position=540")!
+        )
+
+        XCTAssertEqual(
+            callback?.completionProgress(using: 600) ?? -1,
+            0.9,
+            accuracy: 0.0001
+        )
+    }
+
     func testExternalPlaybackCallbackRejectsProgressOutsideDocumentedFractionBounds() {
         XCTAssertNil(ExternalPlaybackCallback.parse(
             URL(string: "nuvio-tv://external-playback/id?progress=-0.01")!
@@ -938,4 +950,3 @@ final class StreamQualityTagsTests: XCTestCase {
         XCTAssertFalse(matchedNames.contains("SDR"), "SDR badge must be suppressed when HDR/DV is present")
     }
 }
-

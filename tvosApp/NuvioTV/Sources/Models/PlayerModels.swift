@@ -355,6 +355,7 @@ struct ExternalPlaybackCallback: Equatable {
     let isError: Bool
     let progress: Double?
     let position: Double?
+    let duration: Double?
 
     static func parse(_ url: URL) -> ExternalPlaybackCallback? {
         guard url.scheme?.lowercased() == "nuvio-tv",
@@ -380,8 +381,23 @@ struct ExternalPlaybackCallback: Equatable {
             id: id,
             isError: isError,
             progress: progress,
-            position: number("position")
+            position: number("position"),
+            duration: number("duration")
         )
+    }
+
+    /// Infuse's current `/play` callback reports an exit position in seconds;
+    /// older builds reported a normalized `progress` fraction. Prefer the
+    /// callback's duration when supplied, then fall back to the runtime Nuvio
+    /// stored with the handoff session.
+    func completionProgress(using fallbackDuration: Double?) -> Double? {
+        if let progress { return progress }
+        guard let position, position.isFinite, position >= 0 else { return nil }
+        let duration = duration ?? fallbackDuration
+        guard let duration, duration.isFinite, duration > 0 else { return nil }
+        let fraction = position / duration
+        guard fraction.isFinite, (0...1).contains(fraction) else { return nil }
+        return fraction
     }
 }
 

@@ -560,4 +560,27 @@ final class StreamsDiscoveryTests: XCTestCase {
         // Non-matching id prefix should fail
         XCTAssertFalse(manifest.supportsResource("stream", type: "series", id: "kitsu:1234"))
     }
+
+    func testAddonTransportUrlsCanonicalizesStremioTypeAliases() {
+        let manifestURL = URL(string: "https://example.com/manifest.json")!
+
+        XCTAssertEqual(
+            AddonTransportUrls.buildResourceURL(
+                manifestURL: manifestURL,
+                resource: "stream",
+                type: "tv",
+                id: "tt1234567:1:1"
+            )?.absoluteString,
+            "https://example.com/stream/series/tt1234567%3A1%3A1.json"
+        )
+        XCTAssertEqual(
+            AddonTransportUrls.buildResourceURL(
+                manifestURL: manifestURL,
+                resource: "stream",
+                type: "movies",
+                id: "tt1234567"
+            )?.absoluteString,
+            "https://example.com/stream/movie/tt1234567.json"
+        )
+    }
 }
