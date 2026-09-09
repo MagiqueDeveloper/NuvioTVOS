@@ -39,6 +39,21 @@ public struct MediaSummary: Identifiable, Codable, Hashable, Sendable {
     public let year: Int?
     public let artwork: Artwork
     public let rating: Double?
+    
+    // Extended metadata
+    public let genres: [String]?
+    public let cast: [CastMember]?
+    public let crew: [CrewMember]?
+    public let runtime: Int?  // minutes
+    public let trailers: [Trailer]?
+    
+    // External IDs
+    public let imdbID: String?
+    public let tmdbID: Int?
+    
+    // Series-specific
+    public let episodeCount: Int?
+    public let seasonCount: Int?
 
     public init(
         id: NuvioID,
@@ -48,7 +63,16 @@ public struct MediaSummary: Identifiable, Codable, Hashable, Sendable {
         overview: String? = nil,
         year: Int? = nil,
         artwork: Artwork = Artwork(),
-        rating: Double? = nil
+        rating: Double? = nil,
+        genres: [String]? = nil,
+        cast: [CastMember]? = nil,
+        crew: [CrewMember]? = nil,
+        runtime: Int? = nil,
+        trailers: [Trailer]? = nil,
+        imdbID: String? = nil,
+        tmdbID: Int? = nil,
+        episodeCount: Int? = nil,
+        seasonCount: Int? = nil
     ) {
         self.id = id
         self.type = type
@@ -58,6 +82,15 @@ public struct MediaSummary: Identifiable, Codable, Hashable, Sendable {
         self.year = year
         self.artwork = artwork
         self.rating = rating
+        self.genres = genres
+        self.cast = cast
+        self.crew = crew
+        self.runtime = runtime
+        self.trailers = trailers
+        self.imdbID = imdbID
+        self.tmdbID = tmdbID
+        self.episodeCount = episodeCount
+        self.seasonCount = seasonCount
     }
 }
 
@@ -253,5 +286,48 @@ public struct DeepLink: Equatable, Sendable {
         case let .continueWatching(id, type): components.host = "continue-watching"; components.queryItems = [.init(name: "id", value: id.rawValue), .init(name: "type", value: type.rawValue)]
         }
         return components.url
+    }
+}
+
+// MARK: - Extended Metadata Types
+
+/// Cast member with character name and billing order
+public struct CastMember: Codable, Hashable, Sendable {
+    public let name: String
+    public let character: String?
+    public let order: Int
+    public let imageURL: URL?
+    
+    public init(name: String, character: String? = nil, order: Int, imageURL: URL? = nil) {
+        self.name = name
+        self.character = character
+        self.order = order
+        self.imageURL = imageURL
+    }
+}
+
+/// Crew member with job title
+public struct CrewMember: Codable, Hashable, Sendable {
+    public let name: String
+    public let job: String
+    public let imageURL: URL?
+    
+    public init(name: String, job: String, imageURL: URL? = nil) {
+        self.name = name
+        self.job = job
+        self.imageURL = imageURL
+    }
+}
+
+/// Trailer or preview video
+public struct Trailer: Codable, Hashable, Sendable {
+    public let name: String
+    public let key: String  // YouTube key or URL
+    public let site: String  // "YouTube", "Vimeo", etc.
+    
+    public init(name: String, key: String, site: String) {
+        self.name = name
+        self.key = key
+        self.site = site
     }
 }

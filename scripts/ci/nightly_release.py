@@ -14,6 +14,7 @@ from pathlib import Path
 NIGHTLY_CHANGE_PATHS = (
     ".github/workflows/",
     "MPVKit/",
+    "Packages/",
     "Vendor/",
     "scripts/",
     "supabase/",

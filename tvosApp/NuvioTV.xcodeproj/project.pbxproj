@@ -1,115 +1,629 @@
 // !$*UTF8*$!
 {
 	archiveVersion = 1;
-	classes = {};
-	objectVersion = 60;
+	classes = {
+	};
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A00000010000000000000001 /* NuvioTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000110000000000000001 /* NuvioTVApp.swift */; };
-		A00000010000000000000002 /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000110000000000000002 /* Images.xcassets */; };
-		A00000010000000000000003 /* AppLanguageCatalog.json in Resources */ = {isa = PBXBuildFile; fileRef = A00000110000000000000003 /* AppLanguageCatalog.json */; };
-		A00000010000000000000004 /* inter_variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A00000110000000000000004 /* inter_variable.ttf */; };
-		A00000010000000000000005 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A00000110000000000000005 /* SplashScreen.storyboard */; };
-		A00000010000000000000006 /* TopShelf.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A00000110000000000000006 /* TopShelf.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		A00000010000000000000007 /* TopShelfContentProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000110000000000000007 /* TopShelfContentProvider.swift */; };
-		A00000010000000000000008 /* NuvioTVTests in Sources */ = {isa = PBXBuildFile; fileRef = A00000110000000000000008 /* NuvioTVTests.swift */; };
+		2484286E0561BDFA8BA14723 /* NuvioData in Frameworks */ = {isa = PBXBuildFile; productRef = BB83505F06F0381D2A7CE086 /* NuvioData */; };
+		3C53EF5DA1EA2500B2967117 /* inter_variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 49AE2CCA73CF507AE66779AE /* inter_variable.ttf */; };
+		3DC6B80E2C0BAE65C3926A55 /* NuvioTVTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7805AE409DF0A4B19A296763 /* NuvioTVTests.swift */; };
+		782B4C1146F8FFF6BBC5BCB6 /* TopShelfContentProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AB10DC8BBE7C318DF415CBA /* TopShelfContentProvider.swift */; };
+		80063B14EF2A7DF38A8EE737 /* NuvioTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB33DAAC2888C4E929BE8E32 /* NuvioTVApp.swift */; };
+		996C4E9FCB24398DAD10030B /* NuvioDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 3958DBE11315BE8219BAD786 /* NuvioDomain */; };
+		A9D4B09E9E1793AEBD0A0705 /* AppLanguageCatalog.json in Resources */ = {isa = PBXBuildFile; fileRef = 4B952312ABF7F8090D4F175E /* AppLanguageCatalog.json */; };
+		B8CD29D2E90D2A58925059D2 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 5EE6082D99700FE296AA9344 /* SplashScreen.storyboard */; };
+		CB4FE6DE4F4A2038847E8042 /* NuvioFeatures in Frameworks */ = {isa = PBXBuildFile; productRef = 9559EFA16F4E14FF99BA280D /* NuvioFeatures */; };
+		CFE6441E9A1340F0AA44D57D /* TopShelf.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F715E1B5E4DA8A80A2307F30 /* TopShelf.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D1A28358717626A46DB79EBB /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E9C3FD93B1B7BF0E8671C97A /* Images.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		A00000210000000000000001 /* Proxy */ = {isa = PBXContainerItemProxy; containerPortal = A00000990000000000000001 /* Project object */; proxyType = 1; remoteGlobalIDString = A00000810000000000000001; remoteInfo = NuvioTV; };
-		A00000210000000000000002 /* Proxy */ = {isa = PBXContainerItemProxy; containerPortal = A00000990000000000000001 /* Project object */; proxyType = 1; remoteGlobalIDString = A00000810000000000000003; remoteInfo = TopShelf; };
+		818050647D34EDFC5A9695BE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8F5B314DFD27C68D213BBFF4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9B28AFC24C4C5D6E30EA9EC5;
+			remoteInfo = NuvioTV;
+		};
+		EAD50DF3BEABACA3EA8DE061 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8F5B314DFD27C68D213BBFF4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 066CD0C8C3A3D74FD0CFD97E;
+			remoteInfo = TopShelf;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		A00000310000000000000001 /* Embed App Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (A00000010000000000000006 /* TopShelf.appex in Embed App Extensions */,); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+		7F1D5FD077876E2DD76EE18F /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				CFE6441E9A1340F0AA44D57D /* TopShelf.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		A00000110000000000000001 /* NuvioTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuvioTV/Sources/NuvioTVApp.swift; sourceTree = "<group>"; };
-		A00000110000000000000002 /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = NuvioTV/Images.xcassets; sourceTree = "<group>"; };
-		A00000110000000000000003 /* AppLanguageCatalog.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = NuvioTV/Resources/AppLanguageCatalog.json; sourceTree = "<group>"; };
-		A00000110000000000000004 /* inter_variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = NuvioTV/Fonts/inter_variable.ttf; sourceTree = "<group>"; };
-		A00000110000000000000005 /* SplashScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = NuvioTV/SplashScreen.storyboard; sourceTree = "<group>"; };
-		A00000110000000000000006 /* TopShelf.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.app-extension; includeInIndex = 0; path = TopShelf.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		A00000110000000000000007 /* TopShelfContentProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopShelf/TopShelfContentProvider.swift; sourceTree = "<group>"; };
-		A00000110000000000000008 /* NuvioTVTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuvioTVTests/NuvioTVTests.swift; sourceTree = "<group>"; };
-		A00000110000000000000009 /* NuvioTV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NuvioTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A0000011000000000000000A /* NuvioTVTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NuvioTVTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A0000011000000000000000C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = NuvioTV/Info.plist; sourceTree = "<group>"; };
-		A0000011000000000000000D /* NuvioTV.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NuvioTV/NuvioTV.entitlements; sourceTree = "<group>"; };
-		A0000011000000000000000E /* TopShelf Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = TopShelf/Info.plist; sourceTree = "<group>"; };
-		A0000011000000000000000F /* TopShelf.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TopShelf/TopShelf.entitlements; sourceTree = "<group>"; };
+		49AE2CCA73CF507AE66779AE /* inter_variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = inter_variable.ttf; sourceTree = "<group>"; };
+		4B952312ABF7F8090D4F175E /* AppLanguageCatalog.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AppLanguageCatalog.json; sourceTree = "<group>"; };
+		55F650C53C617F66AB3ACE65 /* NuvioTVKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = NuvioTVKit; path = ../Packages/NuvioTVKit; sourceTree = SOURCE_ROOT; };
+		5EE6082D99700FE296AA9344 /* SplashScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = SplashScreen.storyboard; sourceTree = "<group>"; };
+		7805AE409DF0A4B19A296763 /* NuvioTVTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuvioTVTests.swift; sourceTree = "<group>"; };
+		8114FE8958B0BEE9C07AF7F6 /* NuvioTVTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = NuvioTVTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9AB10DC8BBE7C318DF415CBA /* TopShelfContentProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopShelfContentProvider.swift; sourceTree = "<group>"; };
+		DB33DAAC2888C4E929BE8E32 /* NuvioTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuvioTVApp.swift; sourceTree = "<group>"; };
+		E082ACA18B306E4D2DFC76F4 /* NuvioTV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = NuvioTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E9C3FD93B1B7BF0E8671C97A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Images.xcassets; sourceTree = "<group>"; };
+		F715E1B5E4DA8A80A2307F30 /* TopShelf.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TopShelf.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F76A991C8910DF0576D29E46 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		FCED93989382A2950B02FB5E /* TopShelf.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TopShelf.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A00000320000000000000001 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		A00000320000000000000002 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		A00000320000000000000003 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		1D2DD522DEEFDFB1EA3E0E4F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2484286E0561BDFA8BA14723 /* NuvioData in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7CF095A04FBE648A8F2200B3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CB4FE6DE4F4A2038847E8042 /* NuvioFeatures in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		99FCAC1C82E3C07546AA7C91 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				996C4E9FCB24398DAD10030B /* NuvioDomain in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		A00000410000000000000001 = {isa = PBXGroup; children = (A00000410000000000000002, A00000410000000000000003, A00000410000000000000004, A00000410000000000000005); sourceTree = "<group>"; };
-		A00000410000000000000002 = {isa = PBXGroup; children = (A00000110000000000000001, A00000110000000000000002, A00000110000000000000003, A00000110000000000000004, A00000110000000000000005, A0000011000000000000000C, A0000011000000000000000D); sourceTree = "<group>"; };
-		A00000410000000000000003 = {isa = PBXGroup; children = (A00000110000000000000007, A0000011000000000000000E, A0000011000000000000000F); sourceTree = "<group>"; };
-		A00000410000000000000004 = {isa = PBXGroup; children = (A00000110000000000000008); sourceTree = "<group>"; };
-		A00000410000000000000005 = {isa = PBXGroup; children = (A00000110000000000000009, A0000011000000000000000A, A00000110000000000000006); name = Products; sourceTree = "<group>"; };
+		00ED4387E0EEF26269D9BA05 /* NuvioTVTests */ = {
+			isa = PBXGroup;
+			children = (
+				7805AE409DF0A4B19A296763 /* NuvioTVTests.swift */,
+			);
+			path = NuvioTVTests;
+			sourceTree = "<group>";
+		};
+		142E5D0675A480D03F64F499 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				DB33DAAC2888C4E929BE8E32 /* NuvioTVApp.swift */,
+			);
+			name = Sources;
+			path = NuvioTV/Sources;
+			sourceTree = "<group>";
+		};
+		2199874BE4896082F0696835 = {
+			isa = PBXGroup;
+			children = (
+				CD74A96EDC4D657AA05D555D /* Fonts */,
+				F0405325CCAAB6FF26CF4B39 /* NuvioTV */,
+				00ED4387E0EEF26269D9BA05 /* NuvioTVTests */,
+				4E260F32D20D77D66C7CA83E /* Packages */,
+				DBE465A7A70C7BCD94E5242C /* Resources */,
+				142E5D0675A480D03F64F499 /* Sources */,
+				E3A9C32D02F60A4794546CB8 /* TopShelf */,
+				E2F0067E16BDF3AD90CAE3F8 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		4E260F32D20D77D66C7CA83E /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				55F650C53C617F66AB3ACE65 /* NuvioTVKit */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		CD74A96EDC4D657AA05D555D /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				49AE2CCA73CF507AE66779AE /* inter_variable.ttf */,
+			);
+			name = Fonts;
+			path = NuvioTV/Fonts;
+			sourceTree = "<group>";
+		};
+		DBE465A7A70C7BCD94E5242C /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				4B952312ABF7F8090D4F175E /* AppLanguageCatalog.json */,
+			);
+			name = Resources;
+			path = NuvioTV/Resources;
+			sourceTree = "<group>";
+		};
+		E2F0067E16BDF3AD90CAE3F8 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				E082ACA18B306E4D2DFC76F4 /* NuvioTV.app */,
+				8114FE8958B0BEE9C07AF7F6 /* NuvioTVTests.xctest */,
+				F715E1B5E4DA8A80A2307F30 /* TopShelf.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E3A9C32D02F60A4794546CB8 /* TopShelf */ = {
+			isa = PBXGroup;
+			children = (
+				F76A991C8910DF0576D29E46 /* Info.plist */,
+				FCED93989382A2950B02FB5E /* TopShelf.entitlements */,
+				9AB10DC8BBE7C318DF415CBA /* TopShelfContentProvider.swift */,
+			);
+			path = TopShelf;
+			sourceTree = "<group>";
+		};
+		F0405325CCAAB6FF26CF4B39 /* NuvioTV */ = {
+			isa = PBXGroup;
+			children = (
+				E9C3FD93B1B7BF0E8671C97A /* Images.xcassets */,
+				5EE6082D99700FE296AA9344 /* SplashScreen.storyboard */,
+			);
+			path = NuvioTV;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A00000810000000000000001 = {isa = PBXNativeTarget; buildConfigurationList = A00000A10000000000000001; buildPhases = (A00000310000000000000002, A00000320000000000000001, A00000310000000000000003, A00000310000000000000001); buildRules = (); dependencies = (A00000B10000000000000001); name = NuvioTV; packageProductDependencies = (A00000C10000000000000001); productName = NuvioTV; productReference = A00000110000000000000009; productType = "com.apple.product-type.application"; };
-		A00000810000000000000002 = {isa = PBXNativeTarget; buildConfigurationList = A00000A10000000000000002; buildPhases = (A00000310000000000000004, A00000320000000000000002, A00000310000000000000005); buildRules = (); dependencies = (A00000B10000000000000002); name = NuvioTVTests; packageProductDependencies = (A00000C10000000000000003); productName = NuvioTVTests; productReference = A0000011000000000000000A; productType = "com.apple.product-type.bundle.unit-test"; };
-		A00000810000000000000003 = {isa = PBXNativeTarget; buildConfigurationList = A00000A10000000000000003; buildPhases = (A00000310000000000000006, A00000320000000000000003, A00000310000000000000007); buildRules = (); dependencies = (); name = TopShelf; packageProductDependencies = (A00000C10000000000000002); productName = TopShelf; productReference = A00000110000000000000006; productType = "com.apple.product-type.app-extension"; };
+		066CD0C8C3A3D74FD0CFD97E /* TopShelf */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 84BF0C0A8485BB14EA1E1609 /* Build configuration list for PBXNativeTarget "TopShelf" */;
+			buildPhases = (
+				B9B25EAFCB4E902ABAAE5F8B /* Sources */,
+				1D2DD522DEEFDFB1EA3E0E4F /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TopShelf;
+			packageProductDependencies = (
+				BB83505F06F0381D2A7CE086 /* NuvioData */,
+			);
+			productName = TopShelf;
+			productReference = F715E1B5E4DA8A80A2307F30 /* TopShelf.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		426513E97679F8DF836825D9 /* NuvioTVTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0F44E30CEEE1B498CAAFDDB3 /* Build configuration list for PBXNativeTarget "NuvioTVTests" */;
+			buildPhases = (
+				BC49B9B69ED61ED1EA54D90A /* Sources */,
+				99FCAC1C82E3C07546AA7C91 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4797B9845EA728EEE75908DF /* PBXTargetDependency */,
+			);
+			name = NuvioTVTests;
+			packageProductDependencies = (
+				3958DBE11315BE8219BAD786 /* NuvioDomain */,
+			);
+			productName = NuvioTVTests;
+			productReference = 8114FE8958B0BEE9C07AF7F6 /* NuvioTVTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		9B28AFC24C4C5D6E30EA9EC5 /* NuvioTV */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C7B2B588629C5B8965B6D8AF /* Build configuration list for PBXNativeTarget "NuvioTV" */;
+			buildPhases = (
+				B27DA642EE4C8E6901537493 /* Sources */,
+				A780F3099E8CBFCB61395E11 /* Resources */,
+				7CF095A04FBE648A8F2200B3 /* Frameworks */,
+				7F1D5FD077876E2DD76EE18F /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				ED93913281FA4632A4DE8AEB /* PBXTargetDependency */,
+			);
+			name = NuvioTV;
+			packageProductDependencies = (
+				9559EFA16F4E14FF99BA280D /* NuvioFeatures */,
+			);
+			productName = NuvioTV;
+			productReference = E082ACA18B306E4D2DFC76F4 /* NuvioTV.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		A00000990000000000000001 = {isa = PBXProject; attributes = {LastUpgradeCheck = 1600; TargetAttributes = {A00000810000000000000001 = {CreatedOnToolsVersion = 16.0;}; A00000810000000000000002 = {CreatedOnToolsVersion = 16.0; TestTargetID = A00000810000000000000001;}; A00000810000000000000003 = {CreatedOnToolsVersion = 16.0;};};}; buildConfigurationList = A00000A10000000000000004; compatibilityVersion = "Xcode 3.2"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = A00000410000000000000001; packageReferences = (A00000D10000000000000001); productRefGroup = A00000410000000000000005; projectDirPath = ""; projectRoot = ""; targets = (A00000810000000000000001, A00000810000000000000002, A00000810000000000000003); };
+		8F5B314DFD27C68D213BBFF4 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 3C2ADD7ADAB90D8E239624CD /* Build configuration list for PBXProject "NuvioTV" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2199874BE4896082F0696835;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B775166B00A99E8A38B19BFE /* XCLocalSwiftPackageReference "../Packages/NuvioTVKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = E2F0067E16BDF3AD90CAE3F8 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9B28AFC24C4C5D6E30EA9EC5 /* NuvioTV */,
+				066CD0C8C3A3D74FD0CFD97E /* TopShelf */,
+				426513E97679F8DF836825D9 /* NuvioTVTests */,
+			);
+		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A00000310000000000000003 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00000010000000000000002, A00000010000000000000003, A00000010000000000000004, A00000010000000000000005); runOnlyForDeploymentPostprocessing = 0; };
-		A00000310000000000000005 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		A00000310000000000000007 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A780F3099E8CBFCB61395E11 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A9D4B09E9E1793AEBD0A0705 /* AppLanguageCatalog.json in Resources */,
+				D1A28358717626A46DB79EBB /* Images.xcassets in Resources */,
+				B8CD29D2E90D2A58925059D2 /* SplashScreen.storyboard in Resources */,
+				3C53EF5DA1EA2500B2967117 /* inter_variable.ttf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A00000310000000000000002 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000010000000000000001); runOnlyForDeploymentPostprocessing = 0; };
-		A00000310000000000000004 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000010000000000000008); runOnlyForDeploymentPostprocessing = 0; };
-		A00000310000000000000006 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000010000000000000007); runOnlyForDeploymentPostprocessing = 0; };
+		B27DA642EE4C8E6901537493 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				80063B14EF2A7DF38A8EE737 /* NuvioTVApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B9B25EAFCB4E902ABAAE5F8B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				782B4C1146F8FFF6BBC5BCB6 /* TopShelfContentProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BC49B9B69ED61ED1EA54D90A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3DC6B80E2C0BAE65C3926A55 /* NuvioTVTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		A00000B10000000000000001 = {isa = PBXTargetDependency; target = A00000810000000000000003; targetProxy = A00000210000000000000002; };
-		A00000B10000000000000002 = {isa = PBXTargetDependency; target = A00000810000000000000001; targetProxy = A00000210000000000000001; };
+		4797B9845EA728EEE75908DF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9B28AFC24C4C5D6E30EA9EC5 /* NuvioTV */;
+			targetProxy = 818050647D34EDFC5A9695BE /* PBXContainerItemProxy */;
+		};
+		ED93913281FA4632A4DE8AEB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 066CD0C8C3A3D74FD0CFD97E /* TopShelf */;
+			targetProxy = EAD50DF3BEABACA3EA8DE061 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		A00000E10000000000000001 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO; PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos; PRODUCT_NAME = NuvioTV; SDKROOT = appletvos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 3; TVOS_DEPLOYMENT_TARGET = 17.5; INFOPLIST_FILE = NuvioTV/Info.plist; CODE_SIGN_ENTITLEMENTS = NuvioTV/NuvioTV.entitlements; }; name = Debug; };
-		A00000E10000000000000002 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO; PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos; PRODUCT_NAME = NuvioTV; SDKROOT = appletvos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 3; TVOS_DEPLOYMENT_TARGET = 17.5; INFOPLIST_FILE = NuvioTV/Info.plist; CODE_SIGN_ENTITLEMENTS = NuvioTV/NuvioTV.entitlements; }; name = Release; };
-		A00000E10000000000000003 = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO; PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos.tests; PRODUCT_NAME = NuvioTVTests; SDKROOT = appletvos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 3; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NuvioTV.app/NuvioTV"; TVOS_DEPLOYMENT_TARGET = 17.5; }; name = Debug; };
-		A00000E10000000000000004 = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO; PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos.tests; PRODUCT_NAME = NuvioTVTests; SDKROOT = appletvos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 3; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NuvioTV.app/NuvioTV"; TVOS_DEPLOYMENT_TARGET = 17.5; }; name = Release; };
-		A00000E10000000000000005 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO; PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos.TopShelf; PRODUCT_NAME = TopShelf; SDKROOT = appletvos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 3; TVOS_DEPLOYMENT_TARGET = 17.5; INFOPLIST_FILE = TopShelf/Info.plist; CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements; SKIP_INSTALL = YES; }; name = Debug; };
-		A00000E10000000000000006 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; CODE_SIGNING_REQUIRED = NO; PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos.TopShelf; PRODUCT_NAME = TopShelf; SDKROOT = appletvos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 3; TVOS_DEPLOYMENT_TARGET = 17.5; INFOPLIST_FILE = TopShelf/Info.plist; CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements; SKIP_INSTALL = YES; }; name = Release; };
-		A00000E10000000000000007 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 5.0; TVOS_DEPLOYMENT_TARGET = 17.5; }; name = Debug; };
-		A00000E10000000000000008 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 5.0; TVOS_DEPLOYMENT_TARGET = 17.5; }; name = Release; };
+		00F04F10507014776986D391 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_ENTITLEMENTS = NuvioTV/NuvioTV.entitlements;
+				INFOPLIST_FILE = NuvioTV/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos;
+				SDKROOT = appletvos;
+				TARGETED_DEVICE_FAMILY = 3;
+			};
+			name = Release;
+		};
+		3E4FD710304BA2D0D41E3C29 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TVOS_DEPLOYMENT_TARGET = 17.5;
+			};
+			name = Release;
+		};
+		4FFC6E97FEE06CB683198C7F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements;
+				INFOPLIST_FILE = TopShelf/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos.TopShelf;
+				SDKROOT = appletvos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 3;
+			};
+			name = Debug;
+		};
+		7F6F3768CE5D0C0277F5E197 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements;
+				INFOPLIST_FILE = TopShelf/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos.TopShelf;
+				SDKROOT = appletvos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 3;
+			};
+			name = Release;
+		};
+		A7E166F0EE21B45EA2CC2F84 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos.tests;
+				SDKROOT = appletvos;
+				TARGETED_DEVICE_FAMILY = 3;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NuvioTV.app/NuvioTV";
+			};
+			name = Debug;
+		};
+		B35B529E51903AA956A76D7C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TVOS_DEPLOYMENT_TARGET = 17.5;
+			};
+			name = Debug;
+		};
+		C73238526E0133B076E5D041 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos.tests;
+				SDKROOT = appletvos;
+				TARGETED_DEVICE_FAMILY = 3;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/NuvioTV.app/NuvioTV";
+			};
+			name = Release;
+		};
+		E3DE35313F78F6B87ABAB7D8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_ENTITLEMENTS = NuvioTV/NuvioTV.entitlements;
+				INFOPLIST_FILE = NuvioTV/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pyksel.nuviotvos;
+				SDKROOT = appletvos;
+				TARGETED_DEVICE_FAMILY = 3;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A00000A10000000000000001 = {isa = XCConfigurationList; buildConfigurations = (A00000E10000000000000001, A00000E10000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-		A00000A10000000000000002 = {isa = XCConfigurationList; buildConfigurations = (A00000E10000000000000003, A00000E10000000000000004); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-		A00000A10000000000000003 = {isa = XCConfigurationList; buildConfigurations = (A00000E10000000000000005, A00000E10000000000000006); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-		A00000A10000000000000004 = {isa = XCConfigurationList; buildConfigurations = (A00000E10000000000000007, A00000E10000000000000008); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		0F44E30CEEE1B498CAAFDDB3 /* Build configuration list for PBXNativeTarget "NuvioTVTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A7E166F0EE21B45EA2CC2F84 /* Debug */,
+				C73238526E0133B076E5D041 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		3C2ADD7ADAB90D8E239624CD /* Build configuration list for PBXProject "NuvioTV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B35B529E51903AA956A76D7C /* Debug */,
+				3E4FD710304BA2D0D41E3C29 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		84BF0C0A8485BB14EA1E1609 /* Build configuration list for PBXNativeTarget "TopShelf" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4FFC6E97FEE06CB683198C7F /* Debug */,
+				7F6F3768CE5D0C0277F5E197 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C7B2B588629C5B8965B6D8AF /* Build configuration list for PBXNativeTarget "NuvioTV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E3DE35313F78F6B87ABAB7D8 /* Debug */,
+				00F04F10507014776986D391 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		A00000D10000000000000001 = {isa = XCLocalSwiftPackageReference; relativePath = ../Packages/NuvioTVKit; };
+		B775166B00A99E8A38B19BFE /* XCLocalSwiftPackageReference "../Packages/NuvioTVKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Packages/NuvioTVKit;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A00000C10000000000000001 = {isa = XCSwiftPackageProductDependency; package = A00000D10000000000000001; productName = NuvioFeatures; };
-		A00000C10000000000000002 = {isa = XCSwiftPackageProductDependency; package = A00000D10000000000000001; productName = NuvioData; };
-		A00000C10000000000000003 = {isa = XCSwiftPackageProductDependency; package = A00000D10000000000000001; productName = NuvioDomain; };
+		3958DBE11315BE8219BAD786 /* NuvioDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NuvioDomain;
+		};
+		9559EFA16F4E14FF99BA280D /* NuvioFeatures */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NuvioFeatures;
+		};
+		BB83505F06F0381D2A7CE086 /* NuvioData */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NuvioData;
+		};
 /* End XCSwiftPackageProductDependency section */
 	};
-	rootObject = A00000990000000000000001;
+	rootObject = 8F5B314DFD27C68D213BBFF4 /* Project object */;
 }

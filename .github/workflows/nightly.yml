@@ -9,6 +9,7 @@ on:
     paths:
       - ".github/workflows/**"
       - "MPVKit/**"
+      - "Packages/**"
       - "Vendor/**"
       - "scripts/**"
       - "supabase/**"

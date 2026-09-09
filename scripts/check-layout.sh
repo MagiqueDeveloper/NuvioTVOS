@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 PACKAGE="$ROOT_DIR/Packages/NuvioTVKit"
 PROJECT="$ROOT_DIR/tvosApp/NuvioTV.xcodeproj"
 

@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 cd "$ROOT_DIR"
 
 if ! command -v supabase >/dev/null 2>&1; then

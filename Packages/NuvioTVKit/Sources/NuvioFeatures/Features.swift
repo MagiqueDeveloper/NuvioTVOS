@@ -4,7 +4,82 @@ import NuvioData
 import NuvioPlayback
 import NuvioUI
 
+// MARK: - Feature Flags
+
+/// Feature flags control incremental rollout of fork/main features.
+/// Start with `.mvp` (Stremio + AetherEngine only), progress to `.full`.
+public struct FeatureFlags: Sendable {
+    /// Enable Jellyfin self-hosted library integration
+    public let enableJellyfin: Bool
+    
+    /// Enable Trakt watch history sync
+    public let enableTrakt: Bool
+    
+    /// Enable Simkl watch history sync
+    public let enableSimkl: Bool
+    
+    /// Enable SMB network share scanning
+    public let enableSMB: Bool
+    
+    /// Enable Debrid resolvers (RealDebrid, Premiumize, Torbox)
+    public let enableDebrid: Bool
+    
+    /// Enable skip intro detection and UI
+    public let enableSkipIntro: Bool
+    
+    /// Enable AI subtitle translation (OpenAI)
+    public let enableAISubtitles: Bool
+    
+    /// Enable cloud library browsing (Premiumize, Torbox)
+    public let enableCloudLibrary: Bool
+    
+    public init(
+        enableJellyfin: Bool = false,
+        enableTrakt: Bool = false,
+        enableSimkl: Bool = false,
+        enableSMB: Bool = false,
+        enableDebrid: Bool = false,
+        enableSkipIntro: Bool = false,
+        enableAISubtitles: Bool = false,
+        enableCloudLibrary: Bool = false
+    ) {
+        self.enableJellyfin = enableJellyfin
+        self.enableTrakt = enableTrakt
+        self.enableSimkl = enableSimkl
+        self.enableSMB = enableSMB
+        self.enableDebrid = enableDebrid
+        self.enableSkipIntro = enableSkipIntro
+        self.enableAISubtitles = enableAISubtitles
+        self.enableCloudLibrary = enableCloudLibrary
+    }
+    
+    /// MVP configuration: Stremio addons + AetherEngine only
+    public static let mvp = FeatureFlags(
+        enableJellyfin: false,
+        enableTrakt: false,
+        enableSimkl: false,
+        enableSMB: false,
+        enableDebrid: true,  // Enable for stream resolution
+        enableSkipIntro: false,
+        enableAISubtitles: false,
+        enableCloudLibrary: false
+    )
+    
+    /// Full configuration: All features enabled
+    public static let full = FeatureFlags(
+        enableJellyfin: true,
+        enableTrakt: true,
+        enableSimkl: true,
+        enableSMB: true,
+        enableDebrid: true,
+        enableSkipIntro: true,
+        enableAISubtitles: true,
+        enableCloudLibrary: true
+    )
+}
+
 public struct AppDependencies: Sendable {
+    public let featureFlags: FeatureFlags
     public let catalog: any CatalogRepository
     public let metadata: any MetadataRepository
     public let streams: any StreamRepository
@@ -15,10 +90,12 @@ public struct AppDependencies: Sendable {
 
     @MainActor
     public static func live() -> AppDependencies {
+        let flags = FeatureFlags.mvp  // Start with MVP configuration
         let repository = MemoryCatalogRepository()
         let importer = LegacyStorageImporter()
         _ = importer.run()
         return AppDependencies(
+            featureFlags: flags,
             catalog: repository,
             metadata: repository,
             streams: repository,
@@ -29,8 +106,8 @@ public struct AppDependencies: Sendable {
         )
     }
 
-    public init(catalog: any CatalogRepository, metadata: any MetadataRepository, streams: any StreamRepository, profiles: any ProfileStore, progress: any ProgressStore, library: any LibraryStore, playbackFactory: @escaping @MainActor @Sendable () -> any PlaybackEngine) {
-        self.catalog = catalog; self.metadata = metadata; self.streams = streams; self.profiles = profiles; self.progress = progress; self.library = library; self.playbackFactory = playbackFactory
+    public init(featureFlags: FeatureFlags, catalog: any CatalogRepository, metadata: any MetadataRepository, streams: any StreamRepository, profiles: any ProfileStore, progress: any ProgressStore, library: any LibraryStore, playbackFactory: @escaping @MainActor @Sendable () -> any PlaybackEngine) {
+        self.featureFlags = featureFlags; self.catalog = catalog; self.metadata = metadata; self.streams = streams; self.profiles = profiles; self.progress = progress; self.library = library; self.playbackFactory = playbackFactory
     }
 }
 
@@ -129,6 +206,17 @@ public struct SearchView: View {
                 .padding(18)
                 .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 .onSubmit { Task { await model.search(query) } }
+                // Keep results in sync with edits made using the tvOS keyboard or dictation.
+                // The task id automatically cancels an obsolete request when the query changes.
+                .task(id: query) {
+                    guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        await model.search("")
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard !Task.isCancelled else { return }
+                    await model.search(query)
+                }
             if let error = model.error { ErrorStateView(message: error) }
             else if model.isLoading { LoadingStateView() }
             else { ScrollView { LazyVStack(alignment: .leading, spacing: 18) { ForEach(model.results) { item in Button(item.title) { open(item) }.buttonStyle(.card).id(item.id) } } } }
@@ -187,7 +275,17 @@ public struct ProfileView: View {
         VStack(alignment: .leading, spacing: 24) {
             Text("Profiles").font(.largeTitle.bold())
             if profiles.isEmpty { Text("No profiles yet.").foregroundStyle(.secondary) }
-            else { ForEach(profiles) { profile in Button(profile.name) { try? store.select(profileID: profile.id); activeID = profile.id }.buttonStyle(.card).id(profile.id) } }
+            else { ForEach(profiles) { profile in
+                Button {
+                    do { try store.select(profileID: profile.id); activeID = profile.id } catch { /* keep the current selection on failure */ }
+                } label: {
+                    HStack {
+                        Text(profile.name)
+                        Spacer()
+                        if activeID == profile.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint) }
+                    }
+                }.buttonStyle(.card).id(profile.id)
+            } }
         }
         .padding(60)
         .task { profiles = (try? store.profiles()) ?? []; activeID = try? store.activeProfile()?.id }
@@ -202,7 +300,7 @@ public enum TopShelfCoordinator {
         let byID = Dictionary(uniqueKeysWithValues: progressItems.map { ($0.id, $0) })
         let entries = page.sections.flatMap(\.items).compactMap { media -> TopShelfEntry? in
             guard let itemProgress = byID[media.id], itemProgress.position > 0 else { return nil }
-            return TopShelfEntry(contentId: media.id.rawValue, contentType: media.type.rawValue, title: media.title, subtitle: media.subtitle, imageURL: media.artwork.poster?.absoluteString, progress: itemProgress.fraction)
+            return TopShelfEntry(contentId: media.id.rawValue, contentType: media.type.rawValue, title: media.title, subtitle: media.subtitle, imageURL: media.artwork.poster?.absoluteString, progress: min(max(itemProgress.fraction ?? 0, 0), 1))
         }
         TopShelfFeedStore.write(Array(entries.prefix(10)))
     }

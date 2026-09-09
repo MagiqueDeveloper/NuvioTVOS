@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 PROJECT="$ROOT_DIR/tvosApp/NuvioTV.xcodeproj"
 SCHEME="NuvioTV"
 CONFIGURATION="${CONFIGURATION:-Debug}"
 DESTINATION="${DESTINATION:-generic/platform=tvOS Simulator}"
 DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$ROOT_DIR/build/tvos-derived/compile}"
+BUILD_ARCHS="${BUILD_ARCHS:-$(uname -m)}"
+ONLY_ACTIVE_ARCH="${ONLY_ACTIVE_ARCH:-YES}"
 
 usage() {
   cat <<'EOF'
@@ -37,4 +37,6 @@ xcodebuild build \
   -configuration "$CONFIGURATION" \
   -destination "$DESTINATION" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
+  ARCHS="$BUILD_ARCHS" \
+  ONLY_ACTIVE_ARCH="$ONLY_ACTIVE_ARCH" \
   CODE_SIGNING_ALLOWED=NO

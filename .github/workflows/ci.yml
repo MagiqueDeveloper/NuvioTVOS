@@ -30,6 +30,9 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Verify app layout
+        run: ./scripts/check-layout.sh
+
       - name: Resolve Swift packages
         run: |
           xcodebuild -resolvePackageDependencies \

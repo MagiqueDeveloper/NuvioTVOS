@@ -22,8 +22,8 @@ public final actor MemoryCatalogRepository: CatalogRepository, MetadataRepositor
     }
 
     public func streams(for title: MediaSummary) async throws -> [MediaStream] {
-        guard let url = URL(string: "https://demo.invalid/(title.id.rawValue).m3u8") else { throw NuvioError.invalidResponse }
-        return [MediaStream(id: "(title.id.rawValue)-default", title: "Auto", url: url)]
+        guard let url = URL(string: "https://demo.invalid/\(title.id.rawValue).m3u8") else { throw NuvioError.invalidResponse }
+        return [MediaStream(id: NuvioID(rawValue: "\(title.id.rawValue)-default"), title: "Auto", url: url)]
     }
 }
 

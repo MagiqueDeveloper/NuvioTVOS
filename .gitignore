@@ -47,3 +47,9 @@ supabase/functions/**/.env
 supabase/functions/**/.env.local
 MPVKit/.build/
 MPVKit/.swiftpm/
+
+# Swift Package Manager build products and Python bytecode
+**/.build/
+**/.swiftpm/
+**/__pycache__/
+*.py[cod]

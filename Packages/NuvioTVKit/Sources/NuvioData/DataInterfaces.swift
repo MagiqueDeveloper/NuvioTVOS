@@ -206,7 +206,7 @@ public final class DefaultProfileStore: ProfileStore, @unchecked Sendable {
     public func profiles() throws -> [Profile] {
         guard let data = defaults.data(forKey: key) else { return [] }
         do { return try JSONDecoder().decode([Profile].self, from: data) }
-        catch { throw NuvioError.decoding("Profiles could not be read: (error.localizedDescription)") }
+        catch { throw NuvioError.decoding("Profiles could not be read: \(error.localizedDescription)") }
     }
 
     public func activeProfile() throws -> Profile? {

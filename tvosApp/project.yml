@@ -1,0 +1,69 @@
+name: NuvioTV
+options:
+  deploymentTarget:
+    tvOS: "17.5"
+  bundleIdPrefix: com.pyksel.nuviotvos
+packages:
+  NuvioTVKit:
+    path: ../Packages/NuvioTVKit
+targets:
+  NuvioTV:
+    type: application
+    platform: tvOS
+    sources:
+      - path: NuvioTV/Sources
+      - path: NuvioTV/Images.xcassets
+        buildPhase: resources
+      - path: NuvioTV/Resources
+        buildPhase: resources
+      - path: NuvioTV/Fonts
+        buildPhase: resources
+      - path: NuvioTV/SplashScreen.storyboard
+        buildPhase: resources
+    info:
+      path: NuvioTV/Info.plist
+    entitlements:
+      path: NuvioTV/NuvioTV.entitlements
+    dependencies:
+      - target: TopShelf
+      - package: NuvioTVKit
+        product: NuvioFeatures
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pyksel.nuviotvos
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        TARGETED_DEVICE_FAMILY: 3
+  TopShelf:
+    type: app-extension
+    platform: tvOS
+    sources: [TopShelf]
+    info:
+      path: TopShelf/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.tv-top-shelf
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).TopShelfContentProvider"
+    entitlements:
+      path: TopShelf/TopShelf.entitlements
+    dependencies:
+      - package: NuvioTVKit
+        product: NuvioData
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pyksel.nuviotvos.TopShelf
+        SKIP_INSTALL: YES
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        TARGETED_DEVICE_FAMILY: 3
+  NuvioTVTests:
+    type: bundle.unit-test
+    platform: tvOS
+    sources: [NuvioTVTests]
+    dependencies:
+      - target: NuvioTV
+      - package: NuvioTVKit
+        product: NuvioDomain
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pyksel.nuviotvos.tests

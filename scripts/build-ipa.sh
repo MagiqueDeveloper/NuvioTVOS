@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 TVOS_PROJECT="$ROOT_DIR/tvosApp/NuvioTV.xcodeproj"
 TVOS_SCHEME="NuvioTV"
 OUTPUT_DIR="$ROOT_DIR/build-ipa"
