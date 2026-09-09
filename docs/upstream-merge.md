@@ -35,7 +35,6 @@ Take these from `origin/main` (overwrite ours):
 - `memory.md`
 - `LICENSE`
 - `scripts/deploy_trakt_function.sh`
-- `scripts/run-mobile.sh`
 - `scripts/translate_catalog.py`
 - `.github/workflows/close-stale-issues.yml`
 - `.github/workflows/close-unlabeled-issues.yml`
@@ -110,7 +109,7 @@ Conflicts are expected. Do not resolve hunk-by-hunk in `tvosApp/` or `Vendor/`.
 git checkout origin/main -- \
   tvosApp Vendor release .agents supabase memory.md LICENSE \
   scripts/deploy_trakt_function.sh \
-  scripts/run-mobile.sh scripts/translate_catalog.py
+  scripts/translate_catalog.py
 
 git checkout HEAD -- \
   .github/ISSUE_TEMPLATE \

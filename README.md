@@ -11,10 +11,10 @@
   <br />
   <br />
 
-  <h1>Nuvio TV for tvOS</h1>
+  <h1>Nuvio Cinema for tvOS</h1>
 
   <p>
-    A modern Apple TV media player for browsing catalogs and playing user-configured sources.
+    A focused Apple TV cinema for resuming, discovering, and playing user-configured sources.
     <br />
     SwiftUI tvOS shell - catalog browsing - AetherEngine / MPVKit playback
   </p>
@@ -102,11 +102,11 @@ Simkl's PIN flow does not need a Client Secret. The Client ID stays on that Appl
 
 ## About
 
-This tree is a **development fork** of [bobsupra/NuvioTVOS](https://github.com/bobsupra/NuvioTVOS). Product direction, official releases, and community issues live upstream. Use this repo for WIP branches, review builds, and preparing pull requests back to upstream.
+This tree is an **independent Nuvio Cinema fork** of [bobsupra/NuvioTVOS](https://github.com/bobsupra/NuvioTVOS). It keeps upstream attribution and compatible playback/integration formats while developing its own tvOS experience.
 
 The app itself is **tvOS-only**: a native SwiftUI Apple TV client under [tvosApp](./tvosApp) with Apple TV navigation, focus handling, profile selection, catalog browsing, details screens, search, library/watchlist surfaces, and playback controls designed for the Siri Remote.
 
-The active development surface is [tvosApp/NuvioTV](./tvosApp/NuvioTV). Android / Kotlin Multiplatform and iOS phone targets are not part of this repository.
+The active development surface is [Packages/NuvioTVKit](./Packages/NuvioTVKit) plus the small app composition root in [tvosApp/NuvioTV/Sources](./tvosApp/NuvioTV/Sources). Android / Kotlin Multiplatform and iOS phone targets are not part of this repository.
 
 ## Current tvOS App
 
@@ -118,7 +118,7 @@ The active development surface is [tvosApp/NuvioTV](./tvosApp/NuvioTV). Android 
 - Cloud library playback through supported connected services.
 - Apple TV Top Shelf extension backed by the active Continue Watching row.
 - Long-press quick actions for poster cards, including details, library toggle, and watched toggle.
-- QR-code and email login flow backed by Supabase configuration in [AuthConfig.swift](./tvosApp/NuvioTV/Sources/Core/Auth/AuthConfig.swift).
+- Typed data, playback, UI, and feature modules live in [Packages/NuvioTVKit](./Packages/NuvioTVKit).
 - tvOS profile/account sync for profiles, add-ons, settings, library, watched state, and progress. Settings follow the selected profile across Apple TVs; device-only app credentials stay local.
 - Trakt device-code login using a user-provided Client ID and Client Secret, stored locally on the Apple TV.
 - Simkl PIN login, watched-history sync, Plan to Watch library sync, playback progress, and scrobbling.
@@ -134,7 +134,6 @@ Contributions are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribu
 
 - macOS with Xcode installed.
 - Apple TV simulator runtime installed in Xcode.
-- CocoaPods if `tvosApp/Pods` needs to be regenerated.
 - Network access for catalog metadata, source lookups, and Swift Package resolution.
 
 The Xcode project targets Apple TV (`SDKROOT = appletvos`) with bundle id `com.nuvio.app.tv`. The tvOS deployment target is configured in [project.pbxproj](./tvosApp/NuvioTV.xcodeproj/project.pbxproj).
@@ -159,18 +158,10 @@ If you already cloned upstream without submodules:
 git submodule update --init --recursive
 ```
 
-Install pods if the CocoaPods workspace has not been generated:
+Open the tvOS project:
 
 ```bash
-cd tvosApp
-pod install
-cd ..
-```
-
-Open the tvOS workspace:
-
-```bash
-open tvosApp/NuvioTV.xcworkspace
+open tvosApp/NuvioTV.xcodeproj
 ```
 
 Use the `NuvioTV` scheme and an Apple TV simulator.
@@ -189,7 +180,7 @@ You can also build directly with Xcode:
 
 ```bash
 xcodebuild \
-  -workspace tvosApp/NuvioTV.xcworkspace \
+  -project tvosApp/NuvioTV.xcodeproj \
   -scheme NuvioTV \
   -configuration Debug \
   -destination 'generic/platform=tvOS Simulator' \
@@ -203,10 +194,10 @@ Account login is optional during development. The login screen supports "Continu
 To enable QR login and email auth, fill in the Supabase values in:
 
 ```text
-tvosApp/NuvioTV/Sources/Core/Auth/AuthConfig.swift
+Packages/NuvioTVKit/Sources/NuvioData
 ```
 
-Catalogs and metadata use configurable catalog, playback, and subtitle endpoints from [CatalogRepository.swift](./tvosApp/NuvioTV/Sources/Data/Repository/CatalogRepository.swift).
+Catalogs and metadata use configurable catalog, playback, and subtitle endpoints from the repository interfaces in [NuvioData](./Packages/NuvioTVKit/Sources/NuvioData).
 
 ## Tests
 
@@ -218,8 +209,8 @@ Unit and UI test targets live in:
 Run tests from Xcode, or with:
 
 ```bash
-xcodebuild test \
-  -workspace tvosApp/NuvioTV.xcworkspace \
+  xcodebuild test \
+  -project tvosApp/NuvioTV.xcodeproj \
   -scheme NuvioTV \
   -destination 'platform=tvOS Simulator,name=Apple TV'
 ```
@@ -228,11 +219,12 @@ Some older verification scripts in `tvosApp/` still carry inherited iOS wording.
 
 ## Project Structure
 
-- `tvosApp/NuvioTV/` contains the native SwiftUI tvOS app.
-- `tvosApp/NuvioTV/Sources/UI/` contains the Apple TV screens and reusable components.
-- `tvosApp/NuvioTV/Sources/ViewModels/` contains the Swift view models for tvOS flows.
-- `tvosApp/NuvioTV/Sources/Data/Repository/` contains catalog, metadata, source, and subtitle fetching.
-- `tvosApp/NuvioTV/Sources/Core/Auth/` contains Supabase email and TV QR-login support.
+- `Packages/NuvioTVKit/Sources/NuvioDomain/` contains pure domain models and errors.
+- `Packages/NuvioTVKit/Sources/NuvioData/` contains repositories, stores, and adapters.
+- `Packages/NuvioTVKit/Sources/NuvioPlayback/` contains the playback seam and Aether adapter.
+- `Packages/NuvioTVKit/Sources/NuvioUI/` contains reusable tvOS presentation primitives.
+- `Packages/NuvioTVKit/Sources/NuvioFeatures/` contains the Home, Search, Library, Details, Profile, and Player flows.
+- `tvosApp/NuvioTV/Sources/` contains only the composition root.
 - `MPVKit/` is a vendored [NuvioMedia/MPVKit](https://github.com/NuvioMedia/MPVKit) snapshot (MoltenVK tvOS) whose `Libmpv` binary is hosted on this fork's [`mpvkit-libmpv`](https://github.com/MagiqueDeveloper/NuvioTVOS/releases/tag/mpvkit-libmpv) release.
 - `Vendor/AetherEngine/` is the primary playback engine package.
 

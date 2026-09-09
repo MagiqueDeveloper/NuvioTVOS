@@ -3,32 +3,33 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TVOS_WORKSPACE="$ROOT_DIR/tvosApp/NuvioTV.xcworkspace"
+TVOS_PROJECT="$ROOT_DIR/tvosApp/NuvioTV.xcodeproj"
 TVOS_SCHEME="NuvioTV"
 OUTPUT_DIR="$ROOT_DIR/build-ipa"
-ARCHIVE_DIR="$(mktemp -d)/NuvioTV.xcarchive"
+ARCHIVE_ROOT="$(mktemp -d)"
+ARCHIVE_PATH="$ARCHIVE_ROOT/NuvioTV.xcarchive"
 
 cleanup() {
-  rm -rf "$(dirname "$ARCHIVE_DIR")"
+  rm -rf "$ARCHIVE_ROOT"
 }
 trap cleanup EXIT
 
 echo "==> Archiving ${TVOS_SCHEME} for tvOS (Release, unsigned)..."
 xcodebuild archive \
-  -workspace "$TVOS_WORKSPACE" \
+  -project "$TVOS_PROJECT" \
   -scheme "$TVOS_SCHEME" \
   -configuration Release \
   -destination 'generic/platform=tvOS' \
-  -archivePath "$ARCHIVE_DIR" \
+  -archivePath "$ARCHIVE_PATH" \
   CODE_SIGN_IDENTITY="" \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGN_ENTITLEMENTS="" \
   -quiet
 
-APP_PATH="$ARCHIVE_DIR/Products/Applications/NuvioTV.app"
+APP_PATH="$ARCHIVE_PATH/Products/Applications/NuvioTV.app"
 if [[ ! -d "$APP_PATH" ]]; then
-  echo "Error: Archive failed, NuvioTV.app not found at $APP_PATH" >&2
+  echo "Error: archive did not contain NuvioTV.app: $APP_PATH" >&2
   exit 1
 fi
 

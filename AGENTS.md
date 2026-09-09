@@ -11,7 +11,7 @@ If either remote is missing, add it before fetching.
 
 ## Upstream overlay
 
-When syncing `bobsupra/NuvioTVOS` into this fork, take upstream's current `main` for **all product code**. Keep only the **fork scaffold** (tvOS-only tree, in-tree MPVKit, Nightly CI, fork identity). Discard older fork implementations of features that upstream now ships.
+This fork is an independent product direction. Integrate upstream selectively for security, engine, and compatibility fixes; do not overwrite the Nuvio Cinema UI and navigation architecture wholesale. Keep the tvOS-only tree, in-tree MPVKit, Nightly CI, and fork identity.
 
 Follow [docs/upstream-merge.md](docs/upstream-merge.md) for the merge, verify, push, and main-only branch cleanup.
 

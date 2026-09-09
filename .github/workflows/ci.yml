@@ -30,20 +30,16 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Install CocoaPods
-        working-directory: tvosApp
-        run: pod install
-
       - name: Resolve Swift packages
         run: |
           xcodebuild -resolvePackageDependencies \
-            -workspace tvosApp/NuvioTV.xcworkspace \
+            -project tvosApp/NuvioTV.xcodeproj \
             -scheme NuvioTV
 
       - name: Build for tvOS Simulator
         run: |
           xcodebuild build \
-            -workspace tvosApp/NuvioTV.xcworkspace \
+            -project tvosApp/NuvioTV.xcodeproj \
             -scheme NuvioTV \
             -configuration Debug \
             -destination 'generic/platform=tvOS Simulator' \
@@ -75,7 +71,7 @@ jobs:
           )"
           echo "Using destination: ${DESTINATION}"
           xcodebuild test \
-            -workspace tvosApp/NuvioTV.xcworkspace \
+            -project tvosApp/NuvioTV.xcodeproj \
             -scheme NuvioTV \
             -destination "${DESTINATION}" \
             -derivedDataPath build/ci-derived \

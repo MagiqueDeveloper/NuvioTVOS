@@ -4,7 +4,7 @@ translate_catalog.py
 
 Extracts localized strings (L10n.string / L10n.format) from the Swift codebase,
 merges new keys into English, and automatically translates missing strings
-across all 34 supported languages in tvosApp/NuvioTV/Resources/AppLanguageCatalog.json.
+across the supported languages in tvosApp/NuvioTV/Resources/AppLanguageCatalog.json.
 """
 
 import argparse

@@ -99,11 +99,6 @@ jobs:
           swift --version
           git rev-parse --short HEAD
 
-      - name: Install CocoaPods
-        if: steps.build_gate.outputs.should_skip != 'true'
-        working-directory: tvosApp
-        run: pod install
-
       - name: Build unsigned IPA
         if: steps.build_gate.outputs.should_skip != 'true'
         run: ./scripts/build-ipa.sh
